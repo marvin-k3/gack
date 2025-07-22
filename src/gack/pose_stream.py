@@ -76,7 +76,7 @@ def main():
     RTSPS_URL = os.getenv('UNIFI_RTSPS_URL')
     if not RTSPS_URL:
         raise RuntimeError('UNIFI_RTSPS_URL not set in .env file')
-    OUTPUT_STREAM = os.path.expanduser('~/Downloads/output.mp4')
+    OUTPUT_STREAM = "outdata/output.mp4"
     FPS = int(os.getenv('FPS', 1))
     SHOW_ORIGINAL = os.getenv('SHOW_ORIGINAL', 'False').lower() in ('1', 'true', 'yes')
 
