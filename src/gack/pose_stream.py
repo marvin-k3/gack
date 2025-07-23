@@ -12,6 +12,8 @@ import logging
 import asyncio
 from datetime import datetime
 from gack.database import PoseDatabase
+import logging
+logger = logging.getLogger(__name__)
 
 
 def process_frame(frame, model, show_original=False):

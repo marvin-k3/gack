@@ -9,6 +9,8 @@ from ultralytics import YOLO
 import requests
 from gack.pose_stream import PoseStreamer, process_frame
 import ffmpeg
+import logging
+logger = logging.getLogger(__name__)
 
 MEDIA_PORT = 8554
 API_PORT = 9997
@@ -137,7 +139,7 @@ def test_pose_streamer_pipeline(mediamtx_server, ffmpeg_stream, yolo_model):
             if now - last_output_time < interval:
                 continue
             last_output_time = now
-            pose_img = process_frame(frame, yolo_model, False)
+            pose_img, poses, confidences, boxes, keypoint_confidences = process_frame(frame, yolo_model, False)
             process.stdin.write(pose_img.astype(np.uint8).tobytes())
             frames_written += 1
     finally:
