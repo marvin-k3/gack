@@ -14,24 +14,52 @@ def process_frame(frame, model, show_original=False):
     """Run pose estimation and draw skeletons on the frame."""
     results = model(frame)
     poses = results[0].keypoints.xy.cpu().numpy() if results[0].keypoints is not None else []
+    confidences = results[0].boxes.conf.cpu().numpy() if results[0].boxes is not None else []
+    boxes = results[0].boxes.xyxy.cpu().numpy() if results[0].boxes is not None else []
+    keypoint_confidences = results[0].keypoints.conf.cpu().numpy() if results[0].keypoints is not None else []
 
     if show_original:
         pose_img = frame.copy()
     else:
         pose_img = np.zeros_like(frame)
 
-    for person in poses:
-        for x, y in person:
-            cv2.circle(pose_img, (int(x), int(y)), 3, (0, 255, 0), -1)
+    # Print comprehensive data for each person detected
+    for i, (person, conf, box, kp_conf) in enumerate(zip(poses, confidences, boxes, keypoint_confidences)):
+        # Calculate bounding box dimensions
+        x1, y1, x2, y2 = box
+        width = x2 - x1
+        height = y2 - y1
+        area = width * height
+        
+        # Calculate average keypoint confidence
+        avg_kp_conf = np.mean(kp_conf) if len(kp_conf) > 0 else 0
+        
+        # Count visible keypoints (confidence > 0.5)
+        visible_keypoints = np.sum(kp_conf > 0.5) if len(kp_conf) > 0 else 0
+        
+        print(f"Person {i+1}:")
+        print(f"  Detection confidence: {conf:.3f}")
+        print(f"  Bounding box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
+        print(f"  Size: {width:.1f} x {height:.1f} pixels (area: {area:.0f})")
+        print(f"  Average keypoint confidence: {avg_kp_conf:.3f}")
+        print(f"  Visible keypoints: {visible_keypoints}/17")
+        
+        # Draw keypoints and skeleton
+        for j, (x, y) in enumerate(person):
+            if kp_conf[j] > 0.5:  # Only draw confident keypoints
+                cv2.circle(pose_img, (int(x), int(y)), 3, (0, 255, 0), -1)
+        
         skeleton = [
             (5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12),
             (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)
         ]
-        for i, j in skeleton:
-            if i < len(person) and j < len(person):
-                pt1 = tuple(map(int, person[i]))
-                pt2 = tuple(map(int, person[j]))
+        for start_idx, end_idx in skeleton:
+            if (start_idx < len(person) and end_idx < len(person) and 
+                kp_conf[start_idx] > 0.5 and kp_conf[end_idx] > 0.5):
+                pt1 = tuple(map(int, person[start_idx]))
+                pt2 = tuple(map(int, person[end_idx]))
                 cv2.line(pose_img, pt1, pt2, (255, 0, 0), 2)
+    
     return pose_img
 
 
