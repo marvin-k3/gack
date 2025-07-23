@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+import logging
 
 
 def process_frame(frame, model, show_original=False):
@@ -23,7 +24,7 @@ def process_frame(frame, model, show_original=False):
     else:
         pose_img = np.zeros_like(frame)
 
-    # Print comprehensive data for each person detected
+    # Log comprehensive data for each person detected
     for i, (person, conf, box, kp_conf) in enumerate(zip(poses, confidences, boxes, keypoint_confidences)):
         # Calculate bounding box dimensions
         x1, y1, x2, y2 = box
@@ -37,12 +38,10 @@ def process_frame(frame, model, show_original=False):
         # Count visible keypoints (confidence > 0.5)
         visible_keypoints = np.sum(kp_conf > 0.5) if len(kp_conf) > 0 else 0
         
-        print(f"Person {i+1}:")
-        print(f"  Detection confidence: {conf:.3f}")
-        print(f"  Bounding box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
-        print(f"  Size: {width:.1f} x {height:.1f} pixels (area: {area:.0f})")
-        print(f"  Average keypoint confidence: {avg_kp_conf:.3f}")
-        print(f"  Visible keypoints: {visible_keypoints}/17")
+        logger.info(f"Person {i+1}: detection_confidence={conf:.3f}, "
+                   f"bbox=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}), "
+                   f"size={width:.1f}x{height:.1f}, area={area:.0f}, "
+                   f"avg_kp_conf={avg_kp_conf:.3f}, visible_kps={visible_keypoints}/17")
         
         # Draw keypoints and skeleton
         for j, (x, y) in enumerate(person):
@@ -74,7 +73,7 @@ class PoseStreamer:
         self.ffmpeg_threads = ffmpeg_threads or []
 
     def handle_sigint(self, signum, frame):
-        print('Received SIGINT, shutting down...')
+        logger.info('Received SIGINT, shutting down...')
         self.shutdown = True
 
     def stream(self):
@@ -84,7 +83,7 @@ class PoseStreamer:
             while not self.shutdown:
                 ret, frame = self.cap.read()
                 if not ret:
-                    print('Failed to read frame from stream')
+                    logger.error('Failed to read frame from stream')
                     break
 
                 now = time.time()
@@ -101,22 +100,38 @@ class PoseStreamer:
             # Wait for ffmpeg output threads to finish
             for t in self.ffmpeg_threads:
                 t.join(timeout=1)
-            print('Shutdown complete.')
+            logger.info('Shutdown complete.')
 
 
 def ffmpeg_output_reader(stream, prefix):
-    import sys
     for line in iter(stream.readline, b''):
         try:
             decoded = line.decode(errors='replace').rstrip('\n')
         except Exception:
             decoded = str(line).rstrip('\n')
-        print(f"{prefix}{decoded}", file=sys.stderr if prefix.strip() == '[FFMPEG][stderr]' else sys.stdout)
+        if prefix.strip() == '[FFMPEG][stderr]':
+            logger.debug(f"FFMPEG stderr: {decoded}")
+        else:
+            logger.debug(f"FFMPEG stdout: {decoded}")
     stream.close()
 
 
 def main():
     load_dotenv()
+    
+    # Setup logging
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('outdata/gack.log')
+        ]
+    )
+    global logger
+    logger = logging.getLogger(__name__)
+    
     RTSPS_URL = os.getenv('UNIFI_RTSPS_URL')
     if not RTSPS_URL:
         raise RuntimeError('UNIFI_RTSPS_URL not set in .env file')
