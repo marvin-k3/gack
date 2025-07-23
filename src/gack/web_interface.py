@@ -83,7 +83,8 @@ async def root():
             
             async function loadLatest() {
                 const limit = document.getElementById('limit').value || 50;
-                const response = await fetch(`/api/detections/latest?limit=${limit}`);
+                const camera_name = document.querySelector('.controls input[type="datetime-local"]').value; // Assuming camera_name is the datetime-local input
+                const response = await fetch(`/api/detections/latest?camera_name=${camera_name}&limit=${limit}`);
                 const detections = await response.json();
                 displayDetections(detections);
             }
@@ -92,13 +93,14 @@ async def root():
                 const startTime = document.getElementById('startTime').value;
                 const endTime = document.getElementById('endTime').value;
                 const limit = document.getElementById('limit').value || 50;
+                const camera_name = document.querySelector('.controls input[type="datetime-local"]').value; // Assuming camera_name is the datetime-local input
                 
                 if (!startTime || !endTime) {
                     alert('Please select both start and end times');
                     return;
                 }
                 
-                const response = await fetch(`/api/detections/timerange?start_time=${startTime}&end_time=${endTime}&limit=${limit}`);
+                const response = await fetch(`/api/detections/timerange?camera_name=${camera_name}&start_time=${startTime}&end_time=${endTime}&limit=${limit}`);
                 const detections = await response.json();
                 displayDetections(detections);
             }
@@ -115,6 +117,7 @@ async def root():
                     div.className = 'detection';
                     div.innerHTML = `
                         <h4>Detection ${detection.id} - ${detection.timestamp}</h4>
+                        <p><strong>Camera:</strong> ${detection.camera_name || 'N/A'}</p>
                         <p>Frame: ${detection.frame_number}, Video Time: ${detection.video_timestamp.toFixed(2)}s</p>
                         <p>People detected: ${detection.detection_data.poses.length}</p>
                         <button onclick="showDetection(${index})">Show Detection</button>
@@ -204,6 +207,7 @@ async def root():
                 const infoDiv = document.createElement('div');
                 infoDiv.innerHTML = `
                     <h4>Currently Showing: Detection ${detection.id}</h4>
+                    <p><strong>Camera:</strong> ${detection.camera_name || 'N/A'}</p>
                     <p>Timestamp: ${detection.timestamp}</p>
                     <p>People: ${poses.length}</p>
                     <button onclick="showDetection(${index - 1})" ${index === 0 ? 'disabled' : ''}>Previous</button>
@@ -231,17 +235,18 @@ async def get_stats():
     return await db.get_detection_stats()
 
 @app.get("/api/detections/latest")
-async def get_latest_detections(limit: int = Query(50, ge=1, le=1000)):
-    """Get the latest detections."""
-    return await db.get_latest_detections(limit)
+async def get_latest_detections(camera_name: str = Query(..., description="Camera name to filter by"), limit: int = Query(50, ge=1, le=1000)):
+    """Get the latest detections for a specific camera."""
+    return await db.get_latest_detections(camera_name, limit)
 
 @app.get("/api/detections/timerange")
 async def get_detections_by_timerange(
+    camera_name: str = Query(..., description="Camera name to filter by"),
     start_time: str = Query(..., description="Start time in ISO format"),
     end_time: str = Query(..., description="End time in ISO format"),
     limit: Optional[int] = Query(50, ge=1, le=1000)
 ):
-    """Get detections within a time range."""
+    """Get detections within a time range for a specific camera."""
     try:
         # Validate datetime format
         datetime.fromisoformat(start_time.replace('Z', '+00:00'))
@@ -249,7 +254,7 @@ async def get_detections_by_timerange(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid datetime format. Use ISO format (YYYY-MM-DDTHH:MM:SS)")
     
-    return await db.get_detections_by_timerange(start_time, end_time, limit)
+    return await db.get_detections_by_timerange(camera_name, start_time, end_time, limit)
 
 @app.get("/api/detections/{detection_id}")
 async def get_detection(detection_id: int):

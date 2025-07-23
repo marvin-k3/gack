@@ -68,16 +68,18 @@ def process_frame(frame, model, show_original=False):
 
 
 class PoseStreamer:
-    def __init__(self, model, cap, process, fps=1, show_original=False, ffmpeg_threads=None, db=None):
+    def __init__(self, model, cap, process, camera_name, fps=1, show_original=False, ffmpeg_threads=None, db=None, shutdown_event=None):
         self.model = model
         self.cap = cap
         self.process = process
+        self.camera_name = camera_name
         self.fps = fps
         self.show_original = show_original
         self.shutdown = False
         self.ffmpeg_threads = ffmpeg_threads or []
         self.db = db
         self.frame_number = 0
+        self.shutdown_event = shutdown_event
 
     def handle_sigint(self, signum, frame):
         logger.info('Received SIGINT, shutting down...')
@@ -87,7 +89,7 @@ class PoseStreamer:
         last_output_time = time.time()
         interval = 1.0 / self.fps
         try:
-            while not self.shutdown:
+            while not self.shutdown and not (self.shutdown_event and self.shutdown_event.is_set()):
                 ret, frame = self.cap.read()
                 if not ret:
                     logger.error('Failed to read frame from stream')
@@ -127,13 +129,14 @@ class PoseStreamer:
             keypoint_confidences_list = [kp_conf.tolist() for kp_conf in keypoint_confidences]
             
             await self.db.save_detection(
-                timestamp=timestamp,
-                frame_number=self.frame_number,
-                video_timestamp=video_timestamp,
-                poses=poses_list,
-                confidences=confidences_list,
-                boxes=boxes_list,
-                keypoint_confidences=keypoint_confidences_list
+                self.camera_name,
+                timestamp,
+                self.frame_number,
+                video_timestamp,
+                poses_list,
+                confidences_list,
+                boxes_list,
+                keypoint_confidences_list
             )
         except Exception as e:
             logger.error(f"Failed to save detection to database: {e}")
@@ -168,37 +171,24 @@ def main():
     global logger
     logger = logging.getLogger(__name__)
     
-    RTSPS_URL = os.getenv('UNIFI_RTSPS_URL')
-    if not RTSPS_URL:
-        raise RuntimeError('UNIFI_RTSPS_URL not set in .env file')
-    logger.info(f"RTSPS_URL: {RTSPS_URL}")
-    OUTPUT_STREAM = "outdata/output.mp4"
+    CAMERAS = os.getenv('CAMERAS')
+    if not CAMERAS:
+        raise RuntimeError('CAMERAS not set in .env file')
+    
+    # Parse cameras: list of (camera_name, rtsp_url)
+    camera_configs = []
+    for entry in CAMERAS.split(','):
+        if '|' not in entry:
+            logger.warning(f"Invalid camera entry: {entry}")
+            continue
+        name, url = entry.split('|', 1)
+        camera_configs.append((name.strip(), url.strip()))
+    if not camera_configs:
+        raise RuntimeError('No valid cameras found in CAMERAS')
+    
     FPS = int(os.getenv('FPS', 1))
     SHOW_ORIGINAL = os.getenv('SHOW_ORIGINAL', 'False').lower() in ('1', 'true', 'yes')
     SAVE_TO_DB = os.getenv('SAVE_TO_DB', 'True').lower() in ('1', 'true', 'yes')
-
-    model = YOLO('models/yolov8n-pose.pt')
-    cap = cv2.VideoCapture(RTSPS_URL)
-    if not cap.isOpened():
-        raise RuntimeError(f'Failed to open stream: {RTSPS_URL}')
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    process = (
-        ffmpeg
-        .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{width}x{height}', framerate=FPS)
-        .output(OUTPUT_STREAM, pix_fmt='yuv420p', vcodec='libx264', r=FPS, preset='veryfast', tune='zerolatency')
-        .overwrite_output()
-        .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)
-    )
-
-    # Start threads to read ffmpeg stdout and stderr
-    threads = []
-    t_out = threading.Thread(target=ffmpeg_output_reader, args=(process.stdout, '[FFMPEG][stdout] '), daemon=True)
-    t_err = threading.Thread(target=ffmpeg_output_reader, args=(process.stderr, '[FFMPEG][stderr] '), daemon=True)
-    t_out.start()
-    t_err.start()
-    threads.extend([t_out, t_err])
 
     # Initialize database if enabled
     db = None
@@ -207,9 +197,50 @@ def main():
         asyncio.run(db.init_db())
         logger.info("Database initialized for pose detection storage")
 
-    streamer = PoseStreamer(model, cap, process, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db)
-    signal.signal(signal.SIGINT, streamer.handle_sigint)
-    streamer.stream()
+    shutdown_event = threading.Event()
+
+    def handle_sigint(signum, frame):
+        logger.info("Received SIGINT, shutting down all streams...")
+        shutdown_event.set()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    def run_stream(camera_name, rtsp_url):
+        logger.info(f"Starting stream for {camera_name}: {rtsp_url}")
+        model = YOLO('models/yolov8n-pose.pt')
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            logger.error(f'Failed to open stream: {rtsp_url}')
+            return
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        output_stream = f"outdata/{camera_name}_output.mp4"
+        process = (
+            ffmpeg
+            .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{width}x{height}', framerate=FPS)
+            .output(output_stream, pix_fmt='yuv420p', vcodec='libx264', r=FPS, preset='veryfast', tune='zerolatency')
+            .overwrite_output()
+            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)
+        )
+        # Start threads to read ffmpeg stdout and stderr
+        threads = []
+        t_out = threading.Thread(target=ffmpeg_output_reader, args=(process.stdout, f'[FFMPEG][stdout][{camera_name}] '), daemon=True)
+        t_err = threading.Thread(target=ffmpeg_output_reader, args=(process.stderr, f'[FFMPEG][stderr][{camera_name}] '), daemon=True)
+        t_out.start()
+        t_err.start()
+        threads.extend([t_out, t_err])
+        streamer = PoseStreamer(model, cap, process, camera_name=camera_name, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db, shutdown_event=shutdown_event)
+        streamer.stream()
+
+    # Start a thread for each camera
+    threads = []
+    for camera_name, rtsp_url in camera_configs:
+        t = threading.Thread(target=run_stream, args=(camera_name, rtsp_url), daemon=True)
+        t.start()
+        threads.append(t)
+    # Wait for all threads to finish
+    for t in threads:
+        t.join()
 
 
 if __name__ == '__main__':

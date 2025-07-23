@@ -26,6 +26,7 @@ class PoseDatabase:
                     frame_number INTEGER NOT NULL,
                     video_timestamp REAL NOT NULL,
                     detection_data TEXT NOT NULL,
+                    camera_name TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -40,10 +41,16 @@ class PoseDatabase:
                 ON detections(video_timestamp)
             """)
             
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_detections_camera_name
+                ON detections(camera_name)
+            """)
+            
             await db.commit()
             logger.info("Database initialized successfully")
     
     async def save_detection(self, 
+                           camera_name: str,
                            timestamp: str, 
                            frame_number: int, 
                            video_timestamp: float,
@@ -61,22 +68,23 @@ class PoseDatabase:
         
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO detections (timestamp, frame_number, video_timestamp, detection_data)
-                VALUES (?, ?, ?, ?)
-            """, (timestamp, frame_number, video_timestamp, json.dumps(detection_data)))
+                INSERT INTO detections (timestamp, frame_number, video_timestamp, detection_data, camera_name)
+                VALUES (?, ?, ?, ?, ?)
+            """, (timestamp, frame_number, video_timestamp, json.dumps(detection_data), camera_name))
             
             await db.commit()
             detection_id = cursor.lastrowid
-            logger.debug(f"Saved detection {detection_id} with {len(poses)} poses")
+            logger.debug(f"Saved detection {detection_id} with {len(poses)} poses for camera {camera_name}")
             return detection_id
     
     async def get_detections_by_timerange(self, 
+                                        camera_name: str,
                                         start_time: str, 
                                         end_time: str, 
                                         limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get detections within a time range."""
         query = """
-            SELECT id, timestamp, frame_number, video_timestamp, detection_data, created_at
+            SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
             FROM detections 
             WHERE timestamp BETWEEN ? AND ?
             ORDER BY timestamp ASC
@@ -94,6 +102,7 @@ class PoseDatabase:
                 for row in rows:
                     detection = {
                         "id": row["id"],
+                        "camera_name": row["camera_name"],
                         "timestamp": row["timestamp"],
                         "frame_number": row["frame_number"],
                         "video_timestamp": row["video_timestamp"],
@@ -109,7 +118,7 @@ class PoseDatabase:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
-                SELECT id, timestamp, frame_number, video_timestamp, detection_data, created_at
+                SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
                 FROM detections 
                 WHERE id = ?
             """, (detection_id,)) as cursor:
@@ -118,6 +127,7 @@ class PoseDatabase:
                 if row:
                     return {
                         "id": row["id"],
+                        "camera_name": row["camera_name"],
                         "timestamp": row["timestamp"],
                         "frame_number": row["frame_number"],
                         "video_timestamp": row["video_timestamp"],
@@ -126,12 +136,12 @@ class PoseDatabase:
                     }
                 return None
     
-    async def get_latest_detections(self, limit: int = 100) -> List[Dict[str, Any]]:
+    async def get_latest_detections(self, camera_name: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get the latest detections."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
-                SELECT id, timestamp, frame_number, video_timestamp, detection_data, created_at
+                SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
                 FROM detections 
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -142,6 +152,7 @@ class PoseDatabase:
                 for row in rows:
                     detection = {
                         "id": row["id"],
+                        "camera_name": row["camera_name"],
                         "timestamp": row["timestamp"],
                         "frame_number": row["frame_number"],
                         "video_timestamp": row["video_timestamp"],
