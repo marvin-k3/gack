@@ -11,6 +11,9 @@ dependencies = [
     "pytest-asyncio>=1.1.0",
     "requests>=2.32.4",
     "numpy<=2.2.6",
+    "aiosqlite>=0.20.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
@@ -31,3 +34,4 @@ packages = ["src/gack"]
 
 [project.scripts]
 gack = "gack.__main__:main"
+gack-web = "gack.web_server:main"

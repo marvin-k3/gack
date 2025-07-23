@@ -9,6 +9,9 @@ import signal
 import sys
 import threading
 import logging
+import asyncio
+from datetime import datetime
+from gack.database import PoseDatabase
 
 
 def process_frame(frame, model, show_original=False):
@@ -59,11 +62,11 @@ def process_frame(frame, model, show_original=False):
                 pt2 = tuple(map(int, person[end_idx]))
                 cv2.line(pose_img, pt1, pt2, (255, 0, 0), 2)
     
-    return pose_img
+    return pose_img, poses, confidences, boxes, keypoint_confidences
 
 
 class PoseStreamer:
-    def __init__(self, model, cap, process, fps=1, show_original=False, ffmpeg_threads=None):
+    def __init__(self, model, cap, process, fps=1, show_original=False, ffmpeg_threads=None, db=None):
         self.model = model
         self.cap = cap
         self.process = process
@@ -71,6 +74,8 @@ class PoseStreamer:
         self.show_original = show_original
         self.shutdown = False
         self.ffmpeg_threads = ffmpeg_threads or []
+        self.db = db
+        self.frame_number = 0
 
     def handle_sigint(self, signum, frame):
         logger.info('Received SIGINT, shutting down...')
@@ -91,8 +96,15 @@ class PoseStreamer:
                     continue
                 last_output_time = now
 
-                pose_img = process_frame(frame, self.model, self.show_original)
+                self.frame_number += 1
+                video_timestamp = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                
+                pose_img, poses, confidences, boxes, keypoint_confidences = process_frame(frame, self.model, self.show_original)
                 self.process.stdin.write(pose_img.astype(np.uint8).tobytes())
+                
+                # Save to database if poses were detected
+                if len(poses) > 0 and self.db:
+                    asyncio.run(self._save_detection(video_timestamp, poses, confidences, boxes, keypoint_confidences))
         finally:
             self.cap.release()
             self.process.stdin.close()
@@ -101,6 +113,28 @@ class PoseStreamer:
             for t in self.ffmpeg_threads:
                 t.join(timeout=1)
             logger.info('Shutdown complete.')
+    
+    async def _save_detection(self, video_timestamp, poses, confidences, boxes, keypoint_confidences):
+        """Save detection data to database."""
+        try:
+            timestamp = datetime.now().isoformat()
+            # Convert numpy arrays to lists for JSON serialization
+            poses_list = [pose.tolist() for pose in poses]
+            confidences_list = confidences.tolist()
+            boxes_list = boxes.tolist()
+            keypoint_confidences_list = [kp_conf.tolist() for kp_conf in keypoint_confidences]
+            
+            await self.db.save_detection(
+                timestamp=timestamp,
+                frame_number=self.frame_number,
+                video_timestamp=video_timestamp,
+                poses=poses_list,
+                confidences=confidences_list,
+                boxes=boxes_list,
+                keypoint_confidences=keypoint_confidences_list
+            )
+        except Exception as e:
+            logger.error(f"Failed to save detection to database: {e}")
 
 
 def ffmpeg_output_reader(stream, prefix):
@@ -138,6 +172,7 @@ def main():
     OUTPUT_STREAM = "outdata/output.mp4"
     FPS = int(os.getenv('FPS', 1))
     SHOW_ORIGINAL = os.getenv('SHOW_ORIGINAL', 'False').lower() in ('1', 'true', 'yes')
+    SAVE_TO_DB = os.getenv('SAVE_TO_DB', 'True').lower() in ('1', 'true', 'yes')
 
     model = YOLO('models/yolov8n-pose.pt')
     cap = cv2.VideoCapture(RTSPS_URL)
@@ -162,7 +197,14 @@ def main():
     t_err.start()
     threads.extend([t_out, t_err])
 
-    streamer = PoseStreamer(model, cap, process, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads)
+    # Initialize database if enabled
+    db = None
+    if SAVE_TO_DB:
+        db = PoseDatabase()
+        asyncio.run(db.init_db())
+        logger.info("Database initialized for pose detection storage")
+
+    streamer = PoseStreamer(model, cap, process, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db)
     signal.signal(signal.SIGINT, streamer.handle_sigint)
     streamer.stream()
 
