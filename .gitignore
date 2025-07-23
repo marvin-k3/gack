@@ -13,3 +13,6 @@ wheels/
 .env
 models/
 outdata/
+
+# OS generated files
+.DS_Store

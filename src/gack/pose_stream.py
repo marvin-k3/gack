@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import signal
 import sys
+import threading
 
 
 def process_frame(frame, model, show_original=False):
@@ -35,13 +36,14 @@ def process_frame(frame, model, show_original=False):
 
 
 class PoseStreamer:
-    def __init__(self, model, cap, process, fps=1, show_original=False):
+    def __init__(self, model, cap, process, fps=1, show_original=False, ffmpeg_threads=None):
         self.model = model
         self.cap = cap
         self.process = process
         self.fps = fps
         self.show_original = show_original
         self.shutdown = False
+        self.ffmpeg_threads = ffmpeg_threads or []
 
     def handle_sigint(self, signum, frame):
         print('Received SIGINT, shutting down...')
@@ -68,7 +70,21 @@ class PoseStreamer:
             self.cap.release()
             self.process.stdin.close()
             self.process.wait()
+            # Wait for ffmpeg output threads to finish
+            for t in self.ffmpeg_threads:
+                t.join(timeout=1)
             print('Shutdown complete.')
+
+
+def ffmpeg_output_reader(stream, prefix):
+    import sys
+    for line in iter(stream.readline, b''):
+        try:
+            decoded = line.decode(errors='replace').rstrip('\n')
+        except Exception:
+            decoded = str(line).rstrip('\n')
+        print(f"{prefix}{decoded}", file=sys.stderr if prefix.strip() == '[FFMPEG][stderr]' else sys.stdout)
+    stream.close()
 
 
 def main():
@@ -92,10 +108,18 @@ def main():
         .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{width}x{height}', framerate=FPS)
         .output(OUTPUT_STREAM, pix_fmt='yuv420p', vcodec='libx264', r=FPS, preset='veryfast', tune='zerolatency')
         .overwrite_output()
-        .run_async(pipe_stdin=True)
+        .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)
     )
 
-    streamer = PoseStreamer(model, cap, process, fps=FPS, show_original=SHOW_ORIGINAL)
+    # Start threads to read ffmpeg stdout and stderr
+    threads = []
+    t_out = threading.Thread(target=ffmpeg_output_reader, args=(process.stdout, '[FFMPEG][stdout] '), daemon=True)
+    t_err = threading.Thread(target=ffmpeg_output_reader, args=(process.stderr, '[FFMPEG][stderr] '), daemon=True)
+    t_out.start()
+    t_err.start()
+    threads.extend([t_out, t_err])
+
+    streamer = PoseStreamer(model, cap, process, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads)
     signal.signal(signal.SIGINT, streamer.handle_sigint)
     streamer.stream()
 
