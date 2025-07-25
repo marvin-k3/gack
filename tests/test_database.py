@@ -43,6 +43,7 @@ async def test_save_and_retrieve_detection(temp_db):
     
     # Save detection
     detection_id = await db.save_detection(
+        'test_camera',
         timestamp=timestamp,
         frame_number=frame_number,
         video_timestamp=video_timestamp,
@@ -75,6 +76,7 @@ async def test_get_latest_detections(temp_db):
     for i in range(5):
         timestamp = datetime.now().isoformat()
         await db.save_detection(
+            'test_camera',
             timestamp=timestamp,
             frame_number=i,
             video_timestamp=float(i),
@@ -85,7 +87,7 @@ async def test_get_latest_detections(temp_db):
         )
     
     # Get latest 3 detections
-    detections = await db.get_latest_detections(limit=3)
+    detections = await db.get_latest_detections('test_camera', limit=3)
     assert len(detections) == 3
     
     # Verify they're ordered by timestamp descending
@@ -102,6 +104,7 @@ async def test_get_detection_stats(temp_db):
     for i in range(3):
         timestamp = datetime.now().isoformat()
         await db.save_detection(
+            'test_camera',
             timestamp=timestamp,
             frame_number=i,
             video_timestamp=float(i),

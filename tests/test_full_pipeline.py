@@ -12,36 +12,71 @@ import ffmpeg
 import logging
 logger = logging.getLogger(__name__)
 
-MEDIA_PORT = 8554
-API_PORT = 9997
+MEDIA_PORT = 18554
+API_PORT = 19997
 RTSP_URL = f"rtsp://localhost:{MEDIA_PORT}/test"
+
+def wait_for_condition(condition_func, timeout=30, check_interval=0.5, description="condition"):
+    """Wait for a condition to be true with timeout."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if condition_func():
+            return True
+        time.sleep(check_interval)
+    return False
+
+def check_port_available(port, host='localhost'):
+    """Check if a port is available for binding."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex((host, port))
+            return result == 0
+    except:
+        return False
 
 @pytest.fixture(scope="session")
 def mediamtx_server():
     """Start MediaMTX with a static config and stop after tests."""
     start = time.time()
     config_content = f"""
+# RTSP server configuration
+rtspAddress: :{MEDIA_PORT}
+
+# API configuration
+api: yes
+apiAddress: :{API_PORT}
+
+# Paths configuration
 paths:
   all:
     source: publisher
-api: yes
-apiAddress: :{API_PORT}
 """
     config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False)
     config_file.write(config_content)
     config_file.close()
+    
     process = subprocess.Popen([
         'mediamtx', config_file.name
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    time.sleep(1)
-    # Wait for API
-    for _ in range(10):
+    
+    # Wait for MediaMTX API to be available
+    def api_ready():
         try:
             r = requests.get(f'http://localhost:{API_PORT}/v3/paths/list', timeout=2)
-            if r.status_code == 200:
-                break
+            return r.status_code == 200
         except Exception:
-            time.sleep(0.2)
+            return False
+    
+    if not wait_for_condition(api_ready, timeout=15, description="MediaMTX API"):
+        # Get process output for debugging
+        stdout, stderr = process.communicate()
+        print(f"MediaMTX stdout: {stdout.decode()}")
+        print(f"MediaMTX stderr: {stderr.decode()}")
+        process.kill()
+        raise RuntimeError("MediaMTX failed to start properly")
+    
     print(f"[TIMER] mediamtx_server setup took {time.time() - start:.2f} seconds")
     yield
     process.terminate()
@@ -55,15 +90,36 @@ apiAddress: :{API_PORT}
 def ffmpeg_stream():
     """Start FFmpeg to push a test pattern to MediaMTX."""
     start = time.time()
-    # Wait for MediaMTX to be up
-    time.sleep(1)
+    
     cmd = [
         'ffmpeg', '-re', '-stream_loop', '-1', '-i', 'testdata/3327806-hd_1920_1080_24fps.mp4',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '10',
         '-f', 'rtsp', RTSP_URL
     ]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    time.sleep(1)  # Give FFmpeg time to start
+    
+    # Wait for FFmpeg to establish connection and start streaming
+    def ffmpeg_ready():
+        # Check if FFmpeg is still running
+        if process.poll() is not None:
+            return False
+        # Check if RTSP stream is available by trying to open it
+        try:
+            cap = cv2.VideoCapture(RTSP_URL)
+            if cap.isOpened():
+                cap.release()
+                return True
+        except:
+            pass
+        return False
+    
+    if not wait_for_condition(ffmpeg_ready, timeout=20, description="FFmpeg RTSP stream"):
+        stdout, stderr = process.communicate()
+        print(f"FFmpeg stdout: {stdout.decode()}")
+        print(f"FFmpeg stderr: {stderr.decode()}")
+        process.kill()
+        raise RuntimeError("FFmpeg failed to start or connect to MediaMTX")
+    
     print(f"[TIMER] ffmpeg_stream setup took {time.time() - start:.2f} seconds")
     yield
     process.terminate()
@@ -105,9 +161,11 @@ def test_rtsp_stream_and_detection(mediamtx_server, ffmpeg_stream, yolo_model):
 
 def test_pose_streamer_pipeline(mediamtx_server, ffmpeg_stream, yolo_model):
     """Test the PoseStreamer pipeline end-to-end with RTSP input and file output."""
+
     import tempfile
     import os
     import time
+    
     RTSP_URL = f"rtsp://localhost:{MEDIA_PORT}/test"
     cap = cv2.VideoCapture(RTSP_URL)
     assert cap.isOpened(), f"Failed to open RTSP stream: {RTSP_URL}"
@@ -123,7 +181,7 @@ def test_pose_streamer_pipeline(mediamtx_server, ffmpeg_stream, yolo_model):
         .overwrite_output()
         .run_async(pipe_stdin=True)
     )
-    streamer = PoseStreamer(yolo_model, cap, process, fps=fps, show_original=False)
+    streamer = PoseStreamer(yolo_model, cap, process, fps=fps, show_original=False, camera_name='test_camera')
     # Run the streamer for a few frames only
     frames_written = 0
     max_frames = 5
