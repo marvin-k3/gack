@@ -346,10 +346,7 @@ async def root():
                         </div>
                     </div>
                 </div>
-                <div class="mt-3">
-                    <button class="btn btn-nvr btn-sm" onclick="forceMultiCameraGrid()">Force Multi-Camera Grid</button>
-                    <button class="btn btn-nvr btn-sm" onclick="addTestCameras()">Add Test Cameras</button>
-                </div>
+
             </div>
             
             <!-- Camera Grid -->
@@ -447,35 +444,10 @@ async def root():
                 try {
                     const response = await fetch('/api/cameras');
                     cameras = await response.json();
-                    console.log('API response for cameras:', cameras);
-                    
-                    // If no cameras returned, create some test cameras for demonstration
-                    if (!cameras || cameras.length === 0) {
-                        console.log('No cameras from API, creating test cameras');
-                        cameras = [
-                            { name: 'camera_1', status: 'live' },
-                            { name: 'camera_2', status: 'live' },
-                            { name: 'camera_3', status: 'live' },
-                            { name: 'camera_4', status: 'live' },
-                            { name: 'camera_5', status: 'live' },
-                            { name: 'camera_6', status: 'live' }
-                        ];
-                    }
-                    
-                    console.log('Final cameras array:', cameras);
                     renderCameraGrid();
                 } catch (error) {
                     console.error('Error loading cameras:', error);
-                    // Fallback to test cameras if API fails
-                    console.log('API failed, creating fallback test cameras');
-                    cameras = [
-                        { name: 'camera_1', status: 'live' },
-                        { name: 'camera_2', status: 'live' },
-                        { name: 'camera_3', status: 'live' },
-                        { name: 'camera_4', status: 'live' },
-                        { name: 'camera_5', status: 'live' },
-                        { name: 'camera_6', status: 'live' }
-                    ];
+                    cameras = [];
                     renderCameraGrid();
                 }
             }
@@ -543,10 +515,6 @@ async def root():
                 // Always use 2 columns: col-md-6 (50% width each on medium+ screens)
                 const colClass = 'col-12 col-md-6';
                 
-                console.log('Rendering cameras:', cameras);
-                console.log('Grid element:', grid);
-                console.log('Grid classList:', grid.classList);
-                
                 cameras.forEach((camera, index) => {
                     const cell = document.createElement('div');
                     cell.className = colClass;
@@ -565,15 +533,10 @@ async def root():
                         </div>
                     `;
                     grid.appendChild(cell);
-                    
-                    console.log(`Added camera ${camera.name} with class: ${colClass} and inline styles`);
                 });
                 
                 // Setup canvases with fixed size
                 setTimeout(setupCanvases, 100);
-                
-                console.log(`Simple 2-column grid: ${colClass}, Cameras: ${cameras.length}`);
-                console.log('Final grid HTML:', grid.innerHTML);
             }
             
             // Simple canvas setup - fixed 640x480 size
@@ -909,29 +872,7 @@ async def root():
                 setTimeout(setupCanvases, 100);
             });
             
-            // Force multi-camera grid for testing
-            function forceMultiCameraGrid() {
-                console.log('Forcing multi-camera grid...');
-                if (cameras.length === 0) {
-                    addTestCameras();
-                }
-                renderCameraGrid();
-            }
-            
-            // Add test cameras
-            function addTestCameras() {
-                console.log('Adding test cameras...');
-                cameras = [
-                    { name: 'camera_1', status: 'live' },
-                    { name: 'camera_2', status: 'live' },
-                    { name: 'camera_3', status: 'live' },
-                    { name: 'camera_4', status: 'live' },
-                    { name: 'camera_5', status: 'live' },
-                    { name: 'camera_6', status: 'live' }
-                ];
-                console.log('Test cameras added:', cameras);
-                renderCameraGrid();
-            }
+
             
             // Initialize app when page loads
             document.addEventListener('DOMContentLoaded', initApp);
