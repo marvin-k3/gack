@@ -59,6 +59,20 @@ async def root():
             .camera-grid {
                 padding: 20px 0;
                 min-height: 60vh;
+                margin-bottom: 140px; /* Add margin to account for fixed timeline */
+            }
+            
+            /* Force 2-column layout */
+            .camera-grid .row {
+                display: flex;
+                flex-wrap: wrap;
+                overflow: hidden; /* Clearfix for float layout */
+            }
+            
+            .camera-grid .col-md-6 {
+                flex: 0 0 50%;
+                max-width: 50%;
+                width: 50%;
             }
             
             .camera-cell {
@@ -69,6 +83,9 @@ async def root():
                 overflow: hidden;
                 box-shadow: 0 4px 15px rgba(0,0,0,0.3);
                 transition: all 0.3s ease;
+                min-height: 520px; /* Height to accommodate header + 480px canvas */
+                display: flex;
+                flex-direction: column;
             }
             
             .camera-cell:hover {
@@ -115,10 +132,12 @@ async def root():
                 background: #000;
                 text-align: center;
                 padding: 10px;
-                min-height: 300px;
+                min-height: 480px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                width: 100%;
+                flex: 1;
             }
             
             .timestamp-overlay {
@@ -136,29 +155,32 @@ async def root():
             }
             
             .camera-canvas {
-                width: 100%;
-                height: 100%;
+                width: 640px;
+                height: 480px;
                 border: 1px solid #34495e;
                 border-radius: 4px;
                 object-fit: contain;
+                max-width: 100%;
+                max-height: 100%;
             }
             
             .timeline-container {
                 background: #2c2c2c;
                 border-top: 2px solid #34495e;
-                padding: 20px 0;
+                padding: 15px 0;
                 position: fixed;
                 bottom: 0;
                 left: 0;
                 right: 0;
                 z-index: 1000;
+                max-height: 120px;
             }
             
             .timeline-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 15px;
+                margin-bottom: 10px;
                 padding: 0 20px;
             }
             
@@ -170,7 +192,7 @@ async def root():
             
             .timeline-scroll {
                 overflow-x: auto;
-                padding: 10px 20px;
+                padding: 5px 20px;
                 background: #1a1a1a;
                 border-radius: 8px;
                 margin: 0 20px;
@@ -178,7 +200,7 @@ async def root():
             }
             
             .timeline-track {
-                height: 60px;
+                height: 40px;
                 background: #34495e;
                 border-radius: 4px;
                 position: relative;
@@ -275,12 +297,30 @@ async def root():
                     padding: 10px 0;
                 }
                 
+                .camera-cell {
+                    min-height: 360px;
+                }
+                
+                .camera-canvas-container {
+                    min-height: 300px;
+                }
+                
                 .timeline-container {
                     padding: 15px 0;
                 }
                 
                 .timeline-scroll {
                     margin: 0 10px;
+                }
+            }
+            
+            @media (min-width: 1200px) {
+                .camera-cell {
+                    min-height: 400px;
+                }
+                
+                .camera-canvas-container {
+                    min-height: 320px;
                 }
             }
         </style>
@@ -305,6 +345,10 @@ async def root():
                             <small class="text-muted">Loading...</small>
                         </div>
                     </div>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-nvr btn-sm" onclick="forceMultiCameraGrid()">Force Multi-Camera Grid</button>
+                    <button class="btn btn-nvr btn-sm" onclick="addTestCameras()">Add Test Cameras</button>
                 </div>
             </div>
             
@@ -403,11 +447,35 @@ async def root():
                 try {
                     const response = await fetch('/api/cameras');
                     cameras = await response.json();
+                    console.log('API response for cameras:', cameras);
+                    
+                    // If no cameras returned, create some test cameras for demonstration
+                    if (!cameras || cameras.length === 0) {
+                        console.log('No cameras from API, creating test cameras');
+                        cameras = [
+                            { name: 'camera_1', status: 'live' },
+                            { name: 'camera_2', status: 'live' },
+                            { name: 'camera_3', status: 'live' },
+                            { name: 'camera_4', status: 'live' },
+                            { name: 'camera_5', status: 'live' },
+                            { name: 'camera_6', status: 'live' }
+                        ];
+                    }
+                    
+                    console.log('Final cameras array:', cameras);
                     renderCameraGrid();
                 } catch (error) {
                     console.error('Error loading cameras:', error);
-                    // Fallback to test camera if API fails
-                    cameras = [{ name: 'test_camera', status: 'live' }];
+                    // Fallback to test cameras if API fails
+                    console.log('API failed, creating fallback test cameras');
+                    cameras = [
+                        { name: 'camera_1', status: 'live' },
+                        { name: 'camera_2', status: 'live' },
+                        { name: 'camera_3', status: 'live' },
+                        { name: 'camera_4', status: 'live' },
+                        { name: 'camera_5', status: 'live' },
+                        { name: 'camera_6', status: 'live' }
+                    ];
                     renderCameraGrid();
                 }
             }
@@ -467,15 +535,23 @@ async def root():
                 }
             }
             
-            // Render camera grid based on screen size
+            // Render camera grid - simple 2-column layout
             function renderCameraGrid() {
                 const grid = document.getElementById('cameraGrid');
                 grid.innerHTML = '';
                 
+                // Always use 2 columns: col-md-6 (50% width each on medium+ screens)
+                const colClass = 'col-12 col-md-6';
+                
+                console.log('Rendering cameras:', cameras);
+                console.log('Grid element:', grid);
+                console.log('Grid classList:', grid.classList);
+                
                 cameras.forEach((camera, index) => {
-                    const colClass = getResponsiveColClass();
                     const cell = document.createElement('div');
                     cell.className = colClass;
+                    // Force inline styles for 50% width
+                    cell.style.cssText = 'width: 50%; float: left; box-sizing: border-box; padding: 0 10px;';
                     cell.innerHTML = `
                         <div class="camera-cell">
                             <div class="camera-header">
@@ -489,10 +565,37 @@ async def root():
                         </div>
                     `;
                     grid.appendChild(cell);
+                    
+                    console.log(`Added camera ${camera.name} with class: ${colClass} and inline styles`);
+                });
+                
+                // Setup canvases with fixed size
+                setTimeout(setupCanvases, 100);
+                
+                console.log(`Simple 2-column grid: ${colClass}, Cameras: ${cameras.length}`);
+                console.log('Final grid HTML:', grid.innerHTML);
+            }
+            
+            // Simple canvas setup - fixed 640x480 size
+            function setupCanvases() {
+                cameras.forEach(camera => {
+                    const canvas = document.getElementById(`canvas_${camera.name}`);
+                    if (canvas) {
+                        // Keep canvas at fixed 640x480 size
+                        canvas.width = 640;
+                        canvas.height = 480;
+                        canvas.style.width = '640px';
+                        canvas.style.height = '480px';
+                    }
                 });
             }
             
-            // Get responsive column class based on screen size
+            // Simple grid calculation - always 2 columns
+            function calculateOptimalGrid() {
+                return 'col-12 col-md-6'; // Always 2 columns (50% width each on medium+ screens)
+            }
+            
+            // Get responsive column class based on screen size (fallback)
             function getResponsiveColClass() {
                 const width = window.innerWidth;
                 if (width < 768) return 'col-12'; // Mobile: 1 per row
@@ -803,7 +906,32 @@ async def root():
             // Handle window resize
             window.addEventListener('resize', () => {
                 renderCameraGrid();
+                setTimeout(setupCanvases, 100);
             });
+            
+            // Force multi-camera grid for testing
+            function forceMultiCameraGrid() {
+                console.log('Forcing multi-camera grid...');
+                if (cameras.length === 0) {
+                    addTestCameras();
+                }
+                renderCameraGrid();
+            }
+            
+            // Add test cameras
+            function addTestCameras() {
+                console.log('Adding test cameras...');
+                cameras = [
+                    { name: 'camera_1', status: 'live' },
+                    { name: 'camera_2', status: 'live' },
+                    { name: 'camera_3', status: 'live' },
+                    { name: 'camera_4', status: 'live' },
+                    { name: 'camera_5', status: 'live' },
+                    { name: 'camera_6', status: 'live' }
+                ];
+                console.log('Test cameras added:', cameras);
+                renderCameraGrid();
+            }
             
             // Initialize app when page loads
             document.addEventListener('DOMContentLoaded', initApp);
