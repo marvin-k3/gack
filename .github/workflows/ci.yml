@@ -15,7 +15,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libgl1 libsm6 libxext6 curl
-            curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.1/mediamtx_v1.13.1_linux_amd64.tar.gz -o mediamtx.tar.gz
+          curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.1/mediamtx_v1.13.1_linux_amd64.tar.gz -o mediamtx.tar.gz
           sudo tar -xzf mediamtx.tar.gz mediamtx
           sudo mv mediamtx /usr/local/bin/
           rm mediamtx.tar.gz
@@ -30,6 +30,12 @@ jobs:
         run: |
           rye sync --no-lock
 
+      - name: Use CPU-only Torch
+        run: |
+          rye run pip install --no-deps torch==2.7.1+cpu torchvision==0.22.1+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+
       - name: Run tests
+        env:
+          CUDA_VISIBLE_DEVICES: ""
         run: |
           rye run pytest -vv
