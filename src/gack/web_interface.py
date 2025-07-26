@@ -57,7 +57,7 @@ async def root():
             }
             
             .camera-grid {
-                padding: 20px 0;
+                padding: 10px 0;
                 min-height: 60vh;
                 margin-bottom: 140px; /* Add margin to account for fixed timeline */
             }
@@ -77,11 +77,11 @@ async def root():
             
             .camera-cell {
                 background: #2c2c2c;
-                border: 2px solid #34495e;
-                border-radius: 8px;
-                margin-bottom: 20px;
+                border: 1px solid #34495e;
+                border-radius: 4px;
+                margin-bottom: 10px;
                 overflow: hidden;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
                 transition: all 0.3s ease;
                 min-height: 520px; /* Height to accommodate header + 480px canvas */
                 display: flex;
@@ -95,7 +95,7 @@ async def root():
             
             .camera-header {
                 background: linear-gradient(90deg, #34495e, #2c3e50);
-                padding: 10px 15px;
+                padding: 5px 10px;
                 border-bottom: 1px solid #34495e;
                 display: flex;
                 justify-content: space-between;
@@ -106,13 +106,13 @@ async def root():
                 color: #ecf0f1;
                 font-weight: 600;
                 margin: 0;
-                font-size: 14px;
+                font-size: 12px;
             }
             
             .camera-status {
-                padding: 4px 8px;
-                border-radius: 12px;
-                font-size: 11px;
+                padding: 2px 6px;
+                border-radius: 8px;
+                font-size: 10px;
                 font-weight: bold;
                 text-transform: uppercase;
             }
@@ -131,7 +131,7 @@ async def root():
                 position: relative;
                 background: #000;
                 text-align: center;
-                padding: 10px;
+                padding: 5px;
                 min-height: 480px;
                 display: flex;
                 align-items: center;
@@ -142,13 +142,13 @@ async def root():
             
             .timestamp-overlay {
                 position: absolute;
-                top: 15px;
-                left: 15px;
+                top: 5px;
+                left: 5px;
                 background: rgba(0, 0, 0, 0.8);
                 color: #ffffff;
-                padding: 5px 10px;
-                border-radius: 4px;
-                font-size: 12px;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 11px;
                 font-weight: 600;
                 z-index: 10;
                 border: 1px solid rgba(255, 255, 255, 0.3);
@@ -158,7 +158,7 @@ async def root():
                 width: 640px;
                 height: 480px;
                 border: 1px solid #34495e;
-                border-radius: 4px;
+                border-radius: 2px;
                 object-fit: contain;
                 max-width: 100%;
                 max-height: 100%;
@@ -551,7 +551,7 @@ async def root():
                     const cell = document.createElement('div');
                     cell.className = colClass;
                     // Force inline styles for 50% width
-                    cell.style.cssText = 'width: 50%; float: left; box-sizing: border-box; padding: 0 10px;';
+                    cell.style.cssText = 'width: 50%; float: left; box-sizing: border-box; padding: 0 5px;';
                     cell.innerHTML = `
                         <div class="camera-cell">
                             <div class="camera-header">
