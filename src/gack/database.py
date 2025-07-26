@@ -4,13 +4,77 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import os
+import asyncio
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
+
+class DatabaseConnectionPool:
+    """Connection pool for SQLite database with WAL mode enabled."""
+    
+    def __init__(self, db_path: str, max_connections: int = 10):
+        self.db_path = db_path
+        self.max_connections = max_connections
+        self._pool = asyncio.Queue(maxsize=max_connections)
+        self._initialized = False
+        self._lock = asyncio.Lock()
+    
+    async def _create_connection(self) -> aiosqlite.Connection:
+        """Create a new database connection with WAL mode enabled."""
+        conn = await aiosqlite.connect(self.db_path)
+        # Enable WAL mode for better concurrency
+        await conn.execute("PRAGMA journal_mode=WAL")
+        # Set other performance optimizations
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA cache_size=10000")
+        await conn.execute("PRAGMA temp_store=MEMORY")
+        return conn
+    
+    async def initialize(self):
+        """Initialize the connection pool."""
+        async with self._lock:
+            if self._initialized:
+                return
+            
+            # Create initial connections
+            for _ in range(self.max_connections):
+                conn = await self._create_connection()
+                await self._pool.put(conn)
+            
+            self._initialized = True
+            logger.info(f"Database connection pool initialized with {self.max_connections} connections")
+    
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get a connection from the pool."""
+        if not self._initialized:
+            await self.initialize()
+        
+        conn = await self._pool.get()
+        try:
+            yield conn
+        finally:
+            # Return connection to pool
+            await self._pool.put(conn)
+    
+    async def close(self):
+        """Close all connections in the pool."""
+        async with self._lock:
+            if not self._initialized:
+                return
+            
+            while not self._pool.empty():
+                conn = await self._pool.get()
+                await conn.close()
+            
+            self._initialized = False
+            logger.info("Database connection pool closed")
 
 class PoseDatabase:
     def __init__(self, db_path: str = "outdata/pose_detections.db"):
         self.db_path = db_path
         self._ensure_db_dir()
+        self._pool = DatabaseConnectionPool(db_path)
     
     def _ensure_db_dir(self):
         """Ensure the database directory exists."""
@@ -18,7 +82,7 @@ class PoseDatabase:
     
     async def init_db(self):
         """Initialize the database with required tables."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS detections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +124,7 @@ class PoseDatabase:
             "detections": detections
         }
         
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             cursor = await db.execute("""
                 INSERT INTO detections (timestamp, frame_number, video_timestamp, detection_data, camera_name)
                 VALUES (?, ?, ?, ?, ?)
@@ -87,7 +151,7 @@ class PoseDatabase:
         if limit:
             query += f" LIMIT {limit}"
         
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(query, (start_time, end_time)) as cursor:
                 rows = await cursor.fetchall()
@@ -109,7 +173,7 @@ class PoseDatabase:
     
     async def get_detection_by_id(self, detection_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific detection by ID."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
@@ -132,7 +196,7 @@ class PoseDatabase:
     
     async def get_latest_detections(self, camera_name: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get the latest detections for a specific camera."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
@@ -160,7 +224,7 @@ class PoseDatabase:
     
     async def get_detection_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             # Total detections
             async with db.execute("SELECT COUNT(*) FROM detections") as cursor:
                 total_detections = (await cursor.fetchone())[0]
@@ -190,7 +254,7 @@ class PoseDatabase:
     
     async def get_cameras(self) -> List[Dict[str, Any]]:
         """Get list of available cameras with their status."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             # Get unique cameras and their latest activity
             async with db.execute("""
                 SELECT DISTINCT camera_name, 
@@ -229,7 +293,7 @@ class PoseDatabase:
     
     async def get_timeline_data(self, limit: int = 1000) -> List[Dict[str, Any]]:
         """Get timeline data for the timeline view - recent detections across all cameras."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
@@ -262,7 +326,7 @@ class PoseDatabase:
         except ValueError:
             return None
         
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             # Get the detection closest to the target timestamp
             async with db.execute("""
@@ -284,9 +348,7 @@ class PoseDatabase:
                         "detection_data": json.loads(row["detection_data"]),
                         "created_at": row["created_at"]
                     }
-                return None 
-
- 
+                return None
 
     async def get_nearest_detection_with_tolerance(self, camera_name: str, timestamp: str, tolerance_seconds: float) -> Optional[Dict[str, Any]]:
         """Get the detection nearest to a specific timestamp for a camera, but only if within tolerance."""
@@ -295,7 +357,7 @@ class PoseDatabase:
         except ValueError:
             return None
         
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._pool.get_connection() as db:
             db.row_factory = aiosqlite.Row
             # Get the detection closest to the target timestamp
             async with db.execute("""
@@ -335,4 +397,8 @@ class PoseDatabase:
                             "created_at": row["created_at"]
                         }
                 
-                return None 
+                return None
+    
+    async def close(self):
+        """Close the database connection pool."""
+        await self._pool.close() 

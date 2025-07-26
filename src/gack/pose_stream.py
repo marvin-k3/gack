@@ -24,6 +24,8 @@ class Detection(BaseModel):
     confidence: float  # Detection confidence score
     bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2) bounding box
     keypoint_confidences: List[float]  # Confidence scores for each keypoint
+    source_frame_width: Optional[int] = None  # Width of the source video frame
+    source_frame_height: Optional[int] = None  # Height of the source video frame
     
     @property
     def bbox_width(self) -> float:
@@ -64,6 +66,9 @@ def process_frame(frame, model, show_original=False):
     else:
         pose_img = np.zeros_like(frame)
 
+    # Get frame dimensions
+    frame_height, frame_width = frame.shape[:2]
+
     # Create Detection objects for each person detected
     detections = []
     for i, (person, conf, box, kp_conf) in enumerate(zip(poses, confidences, boxes, keypoint_confidences)):
@@ -76,7 +81,9 @@ def process_frame(frame, model, show_original=False):
             pose=pose_list,
             confidence=float(conf),
             bbox=bbox_tuple,
-            keypoint_confidences=kp_conf_list
+            keypoint_confidences=kp_conf_list,
+            source_frame_width=frame_width,
+            source_frame_height=frame_height
         )
         detections.append(detection)
         
@@ -273,6 +280,11 @@ def main():
     # Wait for all threads to finish
     for t in threads:
         t.join()
+    
+    # Clean up database connection pool
+    if db:
+        asyncio.run(db.close())
+        logger.info("Database connection pool closed")
 
 
 if __name__ == '__main__':

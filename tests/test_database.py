@@ -26,6 +26,9 @@ async def test_database_initialization(temp_db):
     
     # Verify database file was created
     assert os.path.exists(temp_db)
+    
+    # Clean up
+    await db.close()
 
 @pytest.mark.asyncio
 async def test_save_and_retrieve_detection(temp_db):
@@ -71,6 +74,9 @@ async def test_save_and_retrieve_detection(temp_db):
     assert saved_detection["confidence"] == 0.95
     assert saved_detection["bbox"] == [50.0, 100.0, 200.0, 300.0]
     assert saved_detection["keypoint_confidences"] == [0.9, 0.8]
+    
+    # Clean up
+    await db.close()
 
 @pytest.mark.asyncio
 async def test_get_latest_detections(temp_db):
@@ -102,6 +108,9 @@ async def test_get_latest_detections(temp_db):
     # Verify they're ordered by timestamp descending
     timestamps = [d["timestamp"] for d in detections]
     assert timestamps == sorted(timestamps, reverse=True)
+    
+    # Clean up
+    await db.close()
 
 @pytest.mark.asyncio
 async def test_get_detection_stats(temp_db):
@@ -131,6 +140,9 @@ async def test_get_detection_stats(temp_db):
     assert stats["average_detections_per_frame"] == 1.0
     assert stats["date_range"]["start"] is not None
     assert stats["date_range"]["end"] is not None
+    
+    # Clean up
+    await db.close()
 
 if __name__ == "__main__":
     # Run tests

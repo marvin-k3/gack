@@ -17,9 +17,10 @@ async def lifespan(app: FastAPI):
     # Startup
     await db.init_db()
     yield
-    # Shutdown (if needed)
+    # Shutdown
+    await db.close()
 
-app = FastAPI(title="Gack Pose Detection Replay", version="1.0.0", lifespan=lifespan)
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -114,6 +115,10 @@ async def root():
                 background: #000;
                 text-align: center;
                 padding: 10px;
+                min-height: 300px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
             
             .timestamp-overlay {
@@ -131,10 +136,11 @@ async def root():
             }
             
             .camera-canvas {
-                max-width: 100%;
-                height: auto;
+                width: 100%;
+                height: 100%;
                 border: 1px solid #34495e;
                 border-radius: 4px;
+                object-fit: contain;
             }
             
             .timeline-container {
@@ -315,6 +321,9 @@ async def root():
             <div class="timeline-header">
                 <h6 class="text-light mb-0">Timeline Navigation</h6>
                 <div class="timeline-controls">
+                    <button class="btn btn-nvr btn-sm" id="liveButton" onclick="toggleLiveMode()">
+                        <i class="bi bi-play-circle"></i> <span id="liveButtonText">Live</span>
+                    </button>
                     <button class="btn btn-nvr btn-sm" onclick="loadTimelineData()">
                         <i class="bi bi-arrow-clockwise"></i> Refresh
                     </button>
@@ -340,6 +349,8 @@ async def root():
             let currentTime = null;
             let timelineStart = null;
             let timelineEnd = null;
+            let liveStreamInterval = null;
+            let isLiveMode = true;
             
             // Initialize the application
             async function initApp() {
@@ -347,6 +358,7 @@ async def root():
                 await loadCameras();
                 await loadTimelineData();
                 setupTimelineInteraction();
+                startLiveStream();
             }
             
             // Load system statistics
@@ -400,6 +412,61 @@ async def root():
                 }
             }
             
+            // Start live streaming of detections
+            function startLiveStream() {
+                if (liveStreamInterval) {
+                    clearInterval(liveStreamInterval);
+                }
+                
+                liveStreamInterval = setInterval(async () => {
+                    if (isLiveMode) {
+                        await updateAllCamerasLive();
+                    }
+                }, 1000); // Update every second
+            }
+            
+            // Stop live streaming
+            function stopLiveStream() {
+                if (liveStreamInterval) {
+                    clearInterval(liveStreamInterval);
+                    liveStreamInterval = null;
+                }
+            }
+            
+            // Update all cameras with latest detections
+            async function updateAllCamerasLive() {
+                for (const camera of cameras) {
+                    await updateCameraLive(camera.name);
+                }
+            }
+            
+            // Update single camera with latest detection
+            async function updateCameraLive(cameraName) {
+                try {
+                    const response = await fetch(`/api/detections/latest?camera_name=${encodeURIComponent(cameraName)}&limit=1`);
+                    const detections = await response.json();
+                    
+                    if (detections && detections.length > 0) {
+                        const latestDetection = detections[0];
+                        const detectionTime = new Date(latestDetection.timestamp);
+                        const detectionCount = latestDetection.detection_data.detections ? latestDetection.detection_data.detections.length : 0;
+                        
+                        updateTimestampOverlay(cameraName, detectionTime, detectionCount);
+                        renderDetectionOnCanvas(cameraName, latestDetection);
+                    } else {
+                        // No recent detections, show current time
+                        const now = new Date();
+                        updateTimestampOverlay(cameraName, now, 0);
+                        clearCanvas(cameraName);
+                    }
+                } catch (error) {
+                    console.error(`Error updating camera ${cameraName} live:`, error);
+                    const now = new Date();
+                    updateTimestampOverlay(cameraName, now, 0);
+                    clearCanvas(cameraName);
+                }
+            }
+            
             // Render camera grid based on screen size
             function renderCameraGrid() {
                 const grid = document.getElementById('cameraGrid');
@@ -417,7 +484,7 @@ async def root():
                             </div>
                             <div class="camera-canvas-container">
                                 <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
-                                <canvas id="canvas_${camera.name}" class="camera-canvas" width="320" height="240"></canvas>
+                                <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="480"></canvas>
                             </div>
                         </div>
                     `;
@@ -519,6 +586,10 @@ async def root():
                     if (timelineStart && timelineEnd) {
                         const time = new Date(timelineStart.getTime() + (percentage / 100) * (timelineEnd - timelineStart));
                         jumpToTime(time);
+                        // Update button state when clicking timeline
+                        if (isLiveMode) {
+                            toggleLiveMode();
+                        }
                     }
                 });
             }
@@ -526,6 +597,7 @@ async def root():
             // Jump to specific time
             async function jumpToTime(time) {
                 currentTime = time;
+                isLiveMode = false; // Switch to timeline mode
                 const marker = document.getElementById('timelineMarker');
                 
                 if (timelineStart && timelineEnd) {
@@ -542,21 +614,25 @@ async def root():
             // Update camera view for specific time
             async function updateCameraView(cameraName, time) {
                 try {
-                    // Update timestamp overlay
-                    updateTimestampOverlay(cameraName, time);
-                    
                     // Use a very small tolerance (0.1 seconds) to only show detections very close to the exact time
                     const response = await fetch(`/api/detections/nearest?camera_name=${encodeURIComponent(cameraName)}&timestamp=${time.toISOString()}&tolerance=0.1`);
                     const detection = await response.json();
                     
                     if (detection) {
+                        // Update timestamp overlay with detection count
+                        const detectionCount = detection.detection_data.detections ? detection.detection_data.detections.length : 0;
+                        updateTimestampOverlay(cameraName, time, detectionCount);
                         renderDetectionOnCanvas(cameraName, detection);
                     } else {
                         clearCanvas(cameraName);
+                        // Update timestamp overlay without detection count
+                        updateTimestampOverlay(cameraName, time, 0);
                     }
                 } catch (error) {
                     console.error(`Error updating camera ${cameraName}:`, error);
                     clearCanvas(cameraName);
+                    // Update timestamp overlay without detection count on error
+                    updateTimestampOverlay(cameraName, time, 0);
                 }
             }
             
@@ -571,10 +647,30 @@ async def root():
                 const detections = detection.detection_data.detections || [];
                 if (detections.length === 0) return;
                 
-                // Scale factor to fit poses on canvas
-                const scale = Math.min(canvas.width / 640, canvas.height / 480);
-                const offsetX = (canvas.width - 640 * scale) / 2;
-                const offsetY = (canvas.height - 480 * scale) / 2;
+                // Fill entire canvas with dark background
+                ctx.fillStyle = 'rgba(20, 20, 20, 1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw video frame boundary - full canvas size
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(0, 0, canvas.width, canvas.height);
+                
+                // Get source frame dimensions from the first detection
+                const firstDetection = detections[0];
+                const sourceWidth = firstDetection.source_frame_width || 1920; // fallback
+                const sourceHeight = firstDetection.source_frame_height || 1080; // fallback
+                
+                // Calculate scaling factors to fit source frame to canvas
+                const scaleX = canvas.width / sourceWidth;
+                const scaleY = canvas.height / sourceHeight;
+                const scale = Math.min(scaleX, scaleY); // maintain aspect ratio
+                
+                // Center the scaled frame on the canvas
+                const scaledWidth = sourceWidth * scale;
+                const scaledHeight = sourceHeight * scale;
+                const offsetX = (canvas.width - scaledWidth) / 2;
+                const offsetY = (canvas.height - scaledHeight) / 2;
                 
                 detections.forEach((personDetection) => {
                     const conf = personDetection.confidence;
@@ -589,7 +685,7 @@ async def root():
                     const y2 = (box[3] * scale) + offsetY;
                     
                     ctx.strokeStyle = `rgba(255, 0, 0, ${conf})`;
-                    ctx.lineWidth = 2;
+                    ctx.lineWidth = Math.max(1, 2 * scale);
                     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
                     
                     // Draw keypoints
@@ -600,7 +696,7 @@ async def root():
                             
                             ctx.fillStyle = `rgba(0, 255, 0, ${kp_conf[kpIndex]})`;
                             ctx.beginPath();
-                            ctx.arc(x, y, 2, 0, 2 * Math.PI);
+                            ctx.arc(x, y, Math.max(1, 3 * scale), 0, 2 * Math.PI);
                             ctx.fill();
                         }
                     });
@@ -612,7 +708,7 @@ async def root():
                     ];
                     
                     ctx.strokeStyle = `rgba(255, 0, 0, ${conf})`;
-                    ctx.lineWidth = 1;
+                    ctx.lineWidth = Math.max(1, 1.5 * scale);
                     
                     skeleton.forEach(([start, end]) => {
                         if (start < pose.length && end < pose.length && 
@@ -632,7 +728,7 @@ async def root():
             }
             
             // Update timestamp overlay
-            function updateTimestampOverlay(cameraName, time) {
+            function updateTimestampOverlay(cameraName, time, detectionCount = 0) {
                 const overlay = document.getElementById(`timestamp_${cameraName}`);
                 if (overlay) {
                     const formattedTime = time.toLocaleString('en-US', {
@@ -644,7 +740,12 @@ async def root():
                         second: '2-digit',
                         hour12: false
                     });
-                    overlay.textContent = formattedTime;
+                    
+                    if (detectionCount > 0) {
+                        overlay.textContent = `${formattedTime} (${detectionCount} detection${detectionCount > 1 ? 's' : ''})`;
+                    } else {
+                        overlay.textContent = formattedTime;
+                    }
                 }
             }
             
@@ -656,10 +757,25 @@ async def root():
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                 }
                 
-                // Update timestamp overlay to show "No data"
-                const overlay = document.getElementById(`timestamp_${cameraName}`);
-                if (overlay) {
-                    overlay.textContent = 'No data';
+                // Don't overwrite the timestamp overlay - let it show the current time
+            }
+            
+            // Toggle between live mode and timeline mode
+            function toggleLiveMode() {
+                isLiveMode = !isLiveMode;
+                const liveButton = document.getElementById('liveButton');
+                const liveButtonText = document.getElementById('liveButtonText');
+                
+                if (isLiveMode) {
+                    // Switch to live mode
+                    liveButton.className = 'btn btn-nvr btn-sm btn-success';
+                    liveButtonText.textContent = 'Live';
+                    startLiveStream();
+                } else {
+                    // Switch to timeline mode
+                    liveButton.className = 'btn btn-nvr btn-sm';
+                    liveButtonText.textContent = 'Timeline';
+                    stopLiveStream();
                 }
             }
             
@@ -677,6 +793,8 @@ async def root():
                     const response = await fetch(`/api/detections/timerange?start_time=${startTime}&end_time=${endTime}&limit=1000`);
                     timelineData = await response.json();
                     renderTimeline();
+                    isLiveMode = false; // Switch to timeline mode
+                    toggleLiveMode(); // Update button state
                 } catch (error) {
                     console.error('Error loading time range:', error);
                 }
