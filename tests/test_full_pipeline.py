@@ -3,211 +3,183 @@ import subprocess
 import tempfile
 import time
 import os
+import socket
 import cv2
 import numpy as np
-from ultralytics import YOLO
 import requests
-from gack.pose_stream import PoseStreamer, process_frame
 import ffmpeg
 import logging
+
+from gack.pose_stream import PoseStreamer, process_frame
+
+try:
+    from ultralytics import YOLO
+except Exception:  # pragma: no cover - skip if ultralytics missing
+    YOLO = None
+
 logger = logging.getLogger(__name__)
 
-MEDIA_PORT = 18554
-API_PORT = 19997
+
+def _get_free_port() -> int:
+    """Return an available TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("localhost", 0))
+        return s.getsockname()[1]
+
+
+MEDIA_PORT = _get_free_port()
+API_PORT = _get_free_port()
 RTSP_URL = f"rtsp://localhost:{MEDIA_PORT}/test"
 
-def wait_for_condition(condition_func, timeout=30, check_interval=0.5, description="condition"):
-    """Wait for a condition to be true with timeout."""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
+
+def wait_for_condition(condition_func, timeout=15, check_interval=0.5):
+    """Wait for a condition to become True until timeout."""
+    start = time.time()
+    while time.time() - start < timeout:
         if condition_func():
             return True
         time.sleep(check_interval)
     return False
 
-def check_port_available(port, host='localhost'):
-    """Check if a port is available for binding."""
-    import socket
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            result = s.connect_ex((host, port))
-            return result == 0
-    except:
-        return False
 
 @pytest.fixture(scope="session")
-def mediamtx_server():
-    """Start MediaMTX with a static config and stop after tests."""
-    start = time.time()
+def mediamtx_server() -> None:
+    """Start MediaMTX server with a minimal config."""
     config_content = f"""
-# RTSP server configuration
 rtspAddress: :{MEDIA_PORT}
-
-# API configuration
 api: yes
 apiAddress: :{API_PORT}
-
-# Paths configuration
 paths:
   all:
     source: publisher
 """
-    config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False)
-    config_file.write(config_content)
-    config_file.close()
-    
+    cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False)
+    cfg.write(config_content)
+    cfg.close()
     process = subprocess.Popen([
-        'mediamtx', config_file.name
+        "mediamtx",
+        cfg.name,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    
-    # Wait for MediaMTX API to be available
-    def api_ready():
+
+    def api_ready() -> bool:
         try:
-            r = requests.get(f'http://localhost:{API_PORT}/v3/paths/list', timeout=2)
+            r = requests.get(f"http://localhost:{API_PORT}/v3/paths/list", timeout=2)
             return r.status_code == 200
         except Exception:
             return False
-    
-    if not wait_for_condition(api_ready, timeout=15, description="MediaMTX API"):
-        # Get process output for debugging
-        stdout, stderr = process.communicate()
-        print(f"MediaMTX stdout: {stdout.decode()}")
-        print(f"MediaMTX stderr: {stderr.decode()}")
-        process.kill()
-        raise RuntimeError("MediaMTX failed to start properly")
-    
-    print(f"[TIMER] mediamtx_server setup took {time.time() - start:.2f} seconds")
+
+    assert wait_for_condition(api_ready), "MediaMTX failed to start"
     yield
     process.terminate()
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
-    os.unlink(config_file.name)
+    os.unlink(cfg.name)
+
 
 @pytest.fixture(scope="session")
-def ffmpeg_stream():
-    """Start FFmpeg to push a test pattern to MediaMTX."""
-    start = time.time()
-    
+def ffmpeg_stream(mediamtx_server):
+    """Stream a short video to MediaMTX via FFmpeg."""
     cmd = [
-        'ffmpeg', '-re', '-stream_loop', '-1', '-i', 'testdata/3327806-hd_1920_1080_24fps.mp4',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '10',
-        '-f', 'rtsp', RTSP_URL
+        "ffmpeg",
+        "-re",
+        "-stream_loop",
+        "-1",
+        "-i",
+        "testdata/3327806-hd_1920_1080_24fps.mp4",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-g",
+        "10",
+        "-f",
+        "rtsp",
+        RTSP_URL,
     ]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    
-    # Wait for FFmpeg to establish connection and start streaming
-    def ffmpeg_ready():
-        # Check if FFmpeg is still running
+
+    def ready() -> bool:
         if process.poll() is not None:
             return False
-        # Check if RTSP stream is available by trying to open it
-        try:
-            cap = cv2.VideoCapture(RTSP_URL)
-            if cap.isOpened():
-                cap.release()
-                return True
-        except:
-            pass
-        return False
-    
-    if not wait_for_condition(ffmpeg_ready, timeout=20, description="FFmpeg RTSP stream"):
-        stdout, stderr = process.communicate()
-        print(f"FFmpeg stdout: {stdout.decode()}")
-        print(f"FFmpeg stderr: {stderr.decode()}")
-        process.kill()
-        raise RuntimeError("FFmpeg failed to start or connect to MediaMTX")
-    
-    print(f"[TIMER] ffmpeg_stream setup took {time.time() - start:.2f} seconds")
+        cap = cv2.VideoCapture(RTSP_URL)
+        ok = cap.isOpened()
+        if ok:
+            cap.release()
+        return ok
+
+    assert wait_for_condition(ready), "FFmpeg failed to start"
     yield
     process.terminate()
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+
 
 @pytest.fixture(scope="session")
 def yolo_model():
-    return YOLO('models/yolov8n-pose.pt')
+    if YOLO is None:
+        pytest.skip("ultralytics not available")
+    try:
+        return YOLO("yolov8n-pose.pt")
+    except Exception as e:  # pragma: no cover - network failure etc
+        pytest.skip(f"YOLO model unavailable: {e}")
 
-def test_rtsp_stream_and_detection(mediamtx_server, ffmpeg_stream, yolo_model):
-    """Test that we can read frames from RTSP and run YOLO detection."""
+
+def test_rtsp_stream_and_detection(ffmpeg_stream, yolo_model):
     cap = cv2.VideoCapture(RTSP_URL)
-    assert cap.isOpened(), f"Failed to open RTSP stream: {RTSP_URL}"
-    frames_read = 0
+    assert cap.isOpened(), f"Failed to open {RTSP_URL}"
+    frames = 0
     detections = 0
-    max_attempts = 30
-    for i in range(max_attempts):
+    while frames < 3:
         ret, frame = cap.read()
         if not ret:
-            time.sleep(1)
+            time.sleep(0.5)
             continue
-        frames_read += 1
-        # Run YOLO pose estimation
-        results = yolo_model(frame)
-        if results[0].keypoints is not None:
-            keypoints = results[0].keypoints.xy.cpu().numpy()
-            if len(keypoints) > 0:
+        frames += 1
+        res = yolo_model(frame)
+        if res[0].keypoints is not None:
+            if len(res[0].keypoints.xy) > 0:
                 detections += 1
-        if frames_read >= 5:
-            break
     cap.release()
-    assert frames_read >= 3, f"Expected to read at least 3 frames, got {frames_read}"
-    # We expect 0 detections on testsrc, but pipeline must run
+    assert frames == 3
     assert detections >= 0
-    print(f"Read {frames_read} frames, YOLO ran successfully on all.")
 
-def test_pose_streamer_pipeline(mediamtx_server, ffmpeg_stream, yolo_model):
-    """Test the PoseStreamer pipeline end-to-end with RTSP input and file output."""
 
-    import tempfile
-    import os
-    import time
-    
-    RTSP_URL = f"rtsp://localhost:{MEDIA_PORT}/test"
+def test_pose_streamer_pipeline(ffmpeg_stream, yolo_model):
     cap = cv2.VideoCapture(RTSP_URL)
-    assert cap.isOpened(), f"Failed to open RTSP stream: {RTSP_URL}"
+    assert cap.isOpened(), f"Failed to open {RTSP_URL}"
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = 2
-    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmpfile:
-        output_path = tmpfile.name
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        out_path = tmp.name
     process = (
         ffmpeg
-        .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{width}x{height}', framerate=fps)
-        .output(output_path, pix_fmt='yuv420p', vcodec='libx264', r=fps, preset='veryfast', tune='zerolatency')
+        .input("pipe:", format="rawvideo", pix_fmt="bgr24", s=f"{width}x{height}", framerate=fps)
+        .output(out_path, pix_fmt="yuv420p", vcodec="libx264", r=fps, preset="veryfast", tune="zerolatency")
         .overwrite_output()
         .run_async(pipe_stdin=True)
     )
-    streamer = PoseStreamer(yolo_model, cap, process, fps=fps, show_original=False, camera_name='test_camera')
-    # Run the streamer for a few frames only
+    streamer = PoseStreamer(yolo_model, cap, process, camera_name="cam", fps=fps, show_original=False)
     frames_written = 0
-    max_frames = 5
-    last_output_time = time.time()
-    interval = 1.0 / fps
     try:
-        while frames_written < max_frames:
+        while frames_written < 3:
             ret, frame = cap.read()
             if not ret:
                 time.sleep(0.5)
                 continue
-            now = time.time()
-            if now - last_output_time < interval:
-                continue
-            last_output_time = now
-            pose_img, detections = process_frame(frame, yolo_model, False)
+            pose_img, _ = process_frame(frame, yolo_model, False)
             process.stdin.write(pose_img.astype(np.uint8).tobytes())
             frames_written += 1
     finally:
         cap.release()
         process.stdin.close()
         process.wait()
-    # Check that the output file exists and is non-empty
-    assert os.path.exists(output_path), f"Output file {output_path} does not exist"
-    assert os.path.getsize(output_path) > 1000, f"Output file {output_path} is empty or too small"
-    if os.environ.get('POSE_TEST_KEEP_OUTPUT', '0') == '1':
-        print(f"[POSE_TEST] Output video kept at: {output_path}")
-    else:
-        os.unlink(output_path) 
+    assert os.path.exists(out_path)
+    assert os.path.getsize(out_path) > 1000
+    os.unlink(out_path)
