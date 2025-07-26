@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          rye sync
+          rye sync --no-lock
 
       - name: Run tests
         run: |
