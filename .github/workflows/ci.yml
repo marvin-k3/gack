@@ -15,15 +15,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libgl1 libsm6 libxext6 curl
-          curl -L https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_amd64.tar.gz -o mediamtx.tar.gz
+          curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.1/mediamtx_v1.13.1_linux_amd64.tar.gz -o mediamtx.tar.gz
           sudo tar -xzf mediamtx.tar.gz mediamtx
           sudo mv mediamtx /usr/local/bin/
           rm mediamtx.tar.gz
 
       - name: Install Rye
         run: |
-          curl -sSf https://rye-up.com/get | bash -s -- -y
-          echo "${HOME}/.rye/shims" >> $GITHUB_PATH
+          curl -sSf https://rye.astral.sh/get | RYE_INSTALL_OPTION="--yes" bash
+          echo 'source "$HOME/.rye/env"' >> ~/.profile
+          source "$HOME/.rye/env"
 
       - name: Install Python dependencies
         run: |
