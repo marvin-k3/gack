@@ -197,7 +197,7 @@ def test_pose_streamer_pipeline(mediamtx_server, ffmpeg_stream, yolo_model):
             if now - last_output_time < interval:
                 continue
             last_output_time = now
-            pose_img, poses, confidences, boxes, keypoint_confidences = process_frame(frame, yolo_model, False)
+            pose_img, detections = process_frame(frame, yolo_model, False)
             process.stdin.write(pose_img.astype(np.uint8).tobytes())
             frames_written += 1
     finally:

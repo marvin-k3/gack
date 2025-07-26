@@ -13,7 +13,42 @@ import asyncio
 from datetime import datetime
 from gack.database import PoseDatabase
 import logging
+from pydantic import BaseModel
+from typing import List, Tuple, Optional
 logger = logging.getLogger(__name__)
+
+
+class Detection(BaseModel):
+    """Represents a single person detection with pose estimation data."""
+    pose: List[Tuple[float, float]]  # List of (x, y) keypoint coordinates
+    confidence: float  # Detection confidence score
+    bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2) bounding box
+    keypoint_confidences: List[float]  # Confidence scores for each keypoint
+    
+    @property
+    def bbox_width(self) -> float:
+        """Calculate bounding box width."""
+        return self.bbox[2] - self.bbox[0]
+    
+    @property
+    def bbox_height(self) -> float:
+        """Calculate bounding box height."""
+        return self.bbox[3] - self.bbox[1]
+    
+    @property
+    def bbox_area(self) -> float:
+        """Calculate bounding box area."""
+        return self.bbox_width * self.bbox_height
+    
+    @property
+    def avg_keypoint_confidence(self) -> float:
+        """Calculate average keypoint confidence."""
+        return np.mean(self.keypoint_confidences) if self.keypoint_confidences else 0.0
+    
+    @property
+    def visible_keypoints(self) -> int:
+        """Count visible keypoints (confidence > 0.5)."""
+        return sum(1 for conf in self.keypoint_confidences if conf > 0.5)
 
 
 def process_frame(frame, model, show_original=False):
@@ -29,28 +64,31 @@ def process_frame(frame, model, show_original=False):
     else:
         pose_img = np.zeros_like(frame)
 
-    # Log comprehensive data for each person detected
+    # Create Detection objects for each person detected
+    detections = []
     for i, (person, conf, box, kp_conf) in enumerate(zip(poses, confidences, boxes, keypoint_confidences)):
-        # Calculate bounding box dimensions
-        x1, y1, x2, y2 = box
-        width = x2 - x1
-        height = y2 - y1
-        area = width * height
+        # Convert numpy arrays to lists/tuples for Pydantic
+        pose_list = [(float(x), float(y)) for x, y in person]
+        bbox_tuple = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+        kp_conf_list = [float(conf) for conf in kp_conf]
         
-        # Calculate average keypoint confidence
-        avg_kp_conf = np.mean(kp_conf) if len(kp_conf) > 0 else 0
+        detection = Detection(
+            pose=pose_list,
+            confidence=float(conf),
+            bbox=bbox_tuple,
+            keypoint_confidences=kp_conf_list
+        )
+        detections.append(detection)
         
-        # Count visible keypoints (confidence > 0.5)
-        visible_keypoints = np.sum(kp_conf > 0.5) if len(kp_conf) > 0 else 0
-        
-        logger.info(f"Person {i+1}: detection_confidence={conf:.3f}, "
-                   f"bbox=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}), "
-                   f"size={width:.1f}x{height:.1f}, area={area:.0f}, "
-                   f"avg_kp_conf={avg_kp_conf:.3f}, visible_kps={visible_keypoints}/17")
+        # Log comprehensive data for each person detected
+        logger.info(f"Person {i+1}: detection_confidence={detection.confidence:.3f}, "
+                   f"bbox=({detection.bbox[0]:.1f},{detection.bbox[1]:.1f},{detection.bbox[2]:.1f},{detection.bbox[3]:.1f}), "
+                   f"size={detection.bbox_width:.1f}x{detection.bbox_height:.1f}, area={detection.bbox_area:.0f}, "
+                   f"avg_kp_conf={detection.avg_keypoint_confidence:.3f}, visible_kps={detection.visible_keypoints}/17")
         
         # Draw keypoints and skeleton
-        for j, (x, y) in enumerate(person):
-            if kp_conf[j] > 0.5:  # Only draw confident keypoints
+        for j, (x, y) in enumerate(detection.pose):
+            if detection.keypoint_confidences[j] > 0.5:  # Only draw confident keypoints
                 cv2.circle(pose_img, (int(x), int(y)), 3, (0, 255, 0), -1)
         
         skeleton = [
@@ -58,13 +96,13 @@ def process_frame(frame, model, show_original=False):
             (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)
         ]
         for start_idx, end_idx in skeleton:
-            if (start_idx < len(person) and end_idx < len(person) and 
-                kp_conf[start_idx] > 0.5 and kp_conf[end_idx] > 0.5):
-                pt1 = tuple(map(int, person[start_idx]))
-                pt2 = tuple(map(int, person[end_idx]))
+            if (start_idx < len(detection.pose) and end_idx < len(detection.pose) and 
+                detection.keypoint_confidences[start_idx] > 0.5 and detection.keypoint_confidences[end_idx] > 0.5):
+                pt1 = tuple(map(int, detection.pose[start_idx]))
+                pt2 = tuple(map(int, detection.pose[end_idx]))
                 cv2.line(pose_img, pt1, pt2, (255, 0, 0), 2)
     
-    return pose_img, poses, confidences, boxes, keypoint_confidences
+    return pose_img, detections
 
 
 class PoseStreamer:
@@ -103,12 +141,12 @@ class PoseStreamer:
                 self.frame_number += 1
                 video_timestamp = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
                 
-                pose_img, poses, confidences, boxes, keypoint_confidences = process_frame(frame, self.model, self.show_original)
+                pose_img, detections = process_frame(frame, self.model, self.show_original)
                 self.process.stdin.write(pose_img.astype(np.uint8).tobytes())
                 
                 # Save to database if poses were detected
-                if len(poses) > 0 and self.db:
-                    asyncio.run(self._save_detection(video_timestamp, poses, confidences, boxes, keypoint_confidences))
+                if len(detections) > 0 and self.db:
+                    asyncio.run(self._save_detection(video_timestamp, detections))
         finally:
             self.cap.release()
             self.process.stdin.close()
@@ -118,25 +156,19 @@ class PoseStreamer:
                 t.join(timeout=1)
             logger.info('Shutdown complete.')
     
-    async def _save_detection(self, video_timestamp, poses, confidences, boxes, keypoint_confidences):
+    async def _save_detection(self, video_timestamp, detections):
         """Save detection data to database."""
         try:
             timestamp = datetime.now().isoformat()
-            # Convert numpy arrays to lists for JSON serialization
-            poses_list = [pose.tolist() for pose in poses]
-            confidences_list = confidences.tolist()
-            boxes_list = boxes.tolist()
-            keypoint_confidences_list = [kp_conf.tolist() for kp_conf in keypoint_confidences]
+            # Convert Pydantic Detection objects to dictionaries for JSON serialization
+            detections_list = [detection.model_dump() for detection in detections]
             
             await self.db.save_detection(
                 self.camera_name,
                 timestamp,
                 self.frame_number,
                 video_timestamp,
-                poses_list,
-                confidences_list,
-                boxes_list,
-                keypoint_confidences_list
+                detections_list
             )
         except Exception as e:
             logger.error(f"Failed to save detection to database: {e}")

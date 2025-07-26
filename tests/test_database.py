@@ -4,6 +4,7 @@ import tempfile
 import os
 from datetime import datetime
 from gack.database import PoseDatabase
+from gack.pose_stream import Detection
 
 @pytest.fixture
 def temp_db():
@@ -36,10 +37,15 @@ async def test_save_and_retrieve_detection(temp_db):
     timestamp = datetime.now().isoformat()
     frame_number = 1
     video_timestamp = 1.5
-    poses = [[[100, 200], [150, 250]]]  # One person with 2 keypoints
-    confidences = [0.95]
-    boxes = [[50, 100, 200, 300]]
-    keypoint_confidences = [[0.9, 0.8]]
+    
+    # Create Detection objects
+    detection1 = Detection(
+        pose=[(100.0, 200.0), (150.0, 250.0)],
+        confidence=0.95,
+        bbox=(50.0, 100.0, 200.0, 300.0),
+        keypoint_confidences=[0.9, 0.8]
+    )
+    detections = [detection1.model_dump()]
     
     # Save detection
     detection_id = await db.save_detection(
@@ -47,10 +53,7 @@ async def test_save_and_retrieve_detection(temp_db):
         timestamp=timestamp,
         frame_number=frame_number,
         video_timestamp=video_timestamp,
-        poses=poses,
-        confidences=confidences,
-        boxes=boxes,
-        keypoint_confidences=keypoint_confidences
+        detections=detections
     )
     
     assert detection_id > 0
@@ -61,10 +64,13 @@ async def test_save_and_retrieve_detection(temp_db):
     assert detection["timestamp"] == timestamp
     assert detection["frame_number"] == frame_number
     assert detection["video_timestamp"] == video_timestamp
-    assert detection["detection_data"]["poses"] == poses
-    assert detection["detection_data"]["confidences"] == confidences
-    assert detection["detection_data"]["boxes"] == boxes
-    assert detection["detection_data"]["keypoint_confidences"] == keypoint_confidences
+    assert len(detection["detection_data"]["detections"]) == 1
+    saved_detection = detection["detection_data"]["detections"][0]
+    # Note: Pydantic serializes tuples as lists, so we compare with lists
+    assert saved_detection["pose"] == [[100.0, 200.0], [150.0, 250.0]]
+    assert saved_detection["confidence"] == 0.95
+    assert saved_detection["bbox"] == [50.0, 100.0, 200.0, 300.0]
+    assert saved_detection["keypoint_confidences"] == [0.9, 0.8]
 
 @pytest.mark.asyncio
 async def test_get_latest_detections(temp_db):
@@ -75,15 +81,18 @@ async def test_get_latest_detections(temp_db):
     # Save multiple detections
     for i in range(5):
         timestamp = datetime.now().isoformat()
+        detection = Detection(
+            pose=[(100.0, 200.0)],
+            confidence=0.9,
+            bbox=(50.0, 100.0, 150.0, 200.0),
+            keypoint_confidences=[0.8]
+        )
         await db.save_detection(
             'test_camera',
             timestamp=timestamp,
             frame_number=i,
             video_timestamp=float(i),
-            poses=[[[100, 200]]],
-            confidences=[0.9],
-            boxes=[[50, 100, 150, 200]],
-            keypoint_confidences=[[0.8]]
+            detections=[detection.model_dump()]
         )
     
     # Get latest 3 detections
@@ -103,20 +112,23 @@ async def test_get_detection_stats(temp_db):
     # Save some detections
     for i in range(3):
         timestamp = datetime.now().isoformat()
+        detection = Detection(
+            pose=[(100.0, 200.0)],
+            confidence=0.9,
+            bbox=(50.0, 100.0, 150.0, 200.0),
+            keypoint_confidences=[0.8]
+        )
         await db.save_detection(
             'test_camera',
             timestamp=timestamp,
             frame_number=i,
             video_timestamp=float(i),
-            poses=[[[100, 200]]],
-            confidences=[0.9],
-            boxes=[[50, 100, 150, 200]],
-            keypoint_confidences=[[0.8]]
+            detections=[detection.model_dump()]
         )
     
     stats = await db.get_detection_stats()
     assert stats["total_detections"] == 3
-    assert stats["average_poses_per_detection"] == 1.0
+    assert stats["average_detections_per_frame"] == 1.0
     assert stats["date_range"]["start"] is not None
     assert stats["date_range"]["end"] is not None
 

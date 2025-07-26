@@ -5,17 +5,21 @@ import uvicorn
 from typing import Optional, List
 from datetime import datetime, timedelta
 import json
+from contextlib import asynccontextmanager
 from gack.database import PoseDatabase
-
-app = FastAPI(title="Gack Pose Detection Replay", version="1.0.0")
 
 # Initialize database
 db = PoseDatabase()
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI app."""
+    # Startup
     await db.init_db()
+    yield
+    # Shutdown (if needed)
+
+app = FastAPI(title="Gack Pose Detection Replay", version="1.0.0", lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -53,6 +57,7 @@ async def root():
                 <button onclick="loadLatest()">Load Latest Detections</button>
                 <button onclick="loadByTimeRange()">Load by Time Range</button>
                 <br>
+                <input type="text" id="cameraName" placeholder="Camera Name" value="test_camera">
                 <input type="datetime-local" id="startTime" placeholder="Start Time">
                 <input type="datetime-local" id="endTime" placeholder="End Time">
                 <input type="number" id="limit" placeholder="Limit" value="50">
@@ -77,14 +82,14 @@ async def root():
                 document.getElementById('stats-content').innerHTML = `
                     <p><strong>Total Detections:</strong> ${stats.total_detections}</p>
                     <p><strong>Date Range:</strong> ${stats.date_range.start || 'N/A'} to ${stats.date_range.end || 'N/A'}</p>
-                    <p><strong>Average Poses per Detection:</strong> ${stats.average_poses_per_detection.toFixed(2)}</p>
+                    <p><strong>Average Detections per Frame:</strong> ${stats.average_detections_per_frame.toFixed(2)}</p>
                 `;
             }
             
             async function loadLatest() {
                 const limit = document.getElementById('limit').value || 50;
-                const camera_name = document.querySelector('.controls input[type="datetime-local"]').value; // Assuming camera_name is the datetime-local input
-                const response = await fetch(`/api/detections/latest?camera_name=${camera_name}&limit=${limit}`);
+                const camera_name = document.getElementById('cameraName').value || 'test_camera';
+                const response = await fetch(`/api/detections/latest?camera_name=${encodeURIComponent(camera_name)}&limit=${limit}`);
                 const detections = await response.json();
                 displayDetections(detections);
             }
@@ -93,14 +98,14 @@ async def root():
                 const startTime = document.getElementById('startTime').value;
                 const endTime = document.getElementById('endTime').value;
                 const limit = document.getElementById('limit').value || 50;
-                const camera_name = document.querySelector('.controls input[type="datetime-local"]').value; // Assuming camera_name is the datetime-local input
+                const camera_name = document.getElementById('cameraName').value || 'test_camera';
                 
                 if (!startTime || !endTime) {
                     alert('Please select both start and end times');
                     return;
                 }
                 
-                const response = await fetch(`/api/detections/timerange?camera_name=${camera_name}&start_time=${startTime}&end_time=${endTime}&limit=${limit}`);
+                const response = await fetch(`/api/detections/timerange?camera_name=${encodeURIComponent(camera_name)}&start_time=${startTime}&end_time=${endTime}&limit=${limit}`);
                 const detections = await response.json();
                 displayDetections(detections);
             }
@@ -115,11 +120,12 @@ async def root():
                 detections.forEach((detection, index) => {
                     const div = document.createElement('div');
                     div.className = 'detection';
+                    const detectionCount = detection.detection_data.detections ? detection.detection_data.detections.length : 0;
                     div.innerHTML = `
                         <h4>Detection ${detection.id} - ${detection.timestamp}</h4>
                         <p><strong>Camera:</strong> ${detection.camera_name || 'N/A'}</p>
                         <p>Frame: ${detection.frame_number}, Video Time: ${detection.video_timestamp.toFixed(2)}s</p>
-                        <p>People detected: ${detection.detection_data.poses.length}</p>
+                        <p>People detected: ${detectionCount}</p>
                         <button onclick="showDetection(${index})">Show Detection</button>
                     `;
                     container.appendChild(div);
@@ -139,21 +145,19 @@ async def root():
                 // Clear canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // Draw poses
-                const poses = detection.detection_data.poses;
-                const confidences = detection.detection_data.confidences;
-                const boxes = detection.detection_data.boxes;
-                const keypoint_confidences = detection.detection_data.keypoint_confidences;
+                // Get detections from the new structure
+                const detections = detection.detection_data.detections || [];
                 
                 // Scale factor to fit poses on canvas
                 const scale = Math.min(canvas.width / 640, canvas.height / 480);
                 const offsetX = (canvas.width - 640 * scale) / 2;
                 const offsetY = (canvas.height - 480 * scale) / 2;
                 
-                poses.forEach((person, personIndex) => {
-                    const conf = confidences[personIndex];
-                    const box = boxes[personIndex];
-                    const kp_conf = keypoint_confidences[personIndex];
+                detections.forEach((personDetection, personIndex) => {
+                    const conf = personDetection.confidence;
+                    const box = personDetection.bbox;
+                    const kp_conf = personDetection.keypoint_confidences;
+                    const pose = personDetection.pose;
                     
                     // Draw bounding box
                     const x1 = (box[0] * scale) + offsetX;
@@ -166,7 +170,7 @@ async def root():
                     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
                     
                     // Draw keypoints
-                    person.forEach((point, kpIndex) => {
+                    pose.forEach((point, kpIndex) => {
                         if (kp_conf[kpIndex] > 0.5) {
                             const x = (point[0] * scale) + offsetX;
                             const y = (point[1] * scale) + offsetY;
@@ -188,12 +192,12 @@ async def root():
                     ctx.lineWidth = 2;
                     
                     skeleton.forEach(([start, end]) => {
-                        if (start < person.length && end < person.length && 
+                        if (start < pose.length && end < pose.length && 
                             kp_conf[start] > 0.5 && kp_conf[end] > 0.5) {
-                            const x1 = (person[start][0] * scale) + offsetX;
-                            const y1 = (person[start][1] * scale) + offsetY;
-                            const x2 = (person[end][0] * scale) + offsetX;
-                            const y2 = (person[end][1] * scale) + offsetY;
+                            const x1 = (pose[start][0] * scale) + offsetX;
+                            const y1 = (pose[start][1] * scale) + offsetY;
+                            const x2 = (pose[end][0] * scale) + offsetX;
+                            const y2 = (pose[end][1] * scale) + offsetY;
                             
                             ctx.beginPath();
                             ctx.moveTo(x1, y1);
@@ -209,7 +213,7 @@ async def root():
                     <h4>Currently Showing: Detection ${detection.id}</h4>
                     <p><strong>Camera:</strong> ${detection.camera_name || 'N/A'}</p>
                     <p>Timestamp: ${detection.timestamp}</p>
-                    <p>People: ${poses.length}</p>
+                    <p>People: ${detections.length}</p>
                     <button onclick="showDetection(${index - 1})" ${index === 0 ? 'disabled' : ''}>Previous</button>
                     <button onclick="showDetection(${index + 1})" ${index === currentDetections.length - 1 ? 'disabled' : ''}>Next</button>
                 `;

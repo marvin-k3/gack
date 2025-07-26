@@ -54,16 +54,10 @@ class PoseDatabase:
                            timestamp: str, 
                            frame_number: int, 
                            video_timestamp: float,
-                           poses: List[Dict[str, Any]], 
-                           confidences: List[float], 
-                           boxes: List[List[float]], 
-                           keypoint_confidences: List[List[float]]) -> int:
-        """Save a pose detection to the database."""
+                           detections: List[Dict[str, Any]]) -> int:
+        """Save pose detections to the database."""
         detection_data = {
-            "poses": poses,
-            "confidences": confidences,
-            "boxes": boxes,
-            "keypoint_confidences": keypoint_confidences
+            "detections": detections
         }
         
         async with aiosqlite.connect(self.db_path) as db:
@@ -74,7 +68,7 @@ class PoseDatabase:
             
             await db.commit()
             detection_id = cursor.lastrowid
-            logger.debug(f"Saved detection {detection_id} with {len(poses)} poses for camera {camera_name}")
+            logger.debug(f"Saved detection {detection_id} with {len(detections)} detections for camera {camera_name}")
             return detection_id
     
     async def get_detections_by_timerange(self, 
@@ -137,15 +131,16 @@ class PoseDatabase:
                 return None
     
     async def get_latest_detections(self, camera_name: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get the latest detections."""
+        """Get the latest detections for a specific camera."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, camera_name, timestamp, frame_number, video_timestamp, detection_data, created_at
                 FROM detections 
+                WHERE camera_name = ?
                 ORDER BY timestamp DESC
                 LIMIT ?
-            """, (limit,)) as cursor:
+            """, (camera_name, limit)) as cursor:
                 rows = await cursor.fetchall()
                 
                 detections = []
@@ -177,12 +172,12 @@ class PoseDatabase:
             """) as cursor:
                 time_range = await cursor.fetchone()
             
-            # Average poses per detection
+            # Average detections per frame
             async with db.execute("""
-                SELECT AVG(json_array_length(detection_data, '$.poses')) as avg_poses
+                SELECT AVG(json_array_length(detection_data, '$.detections')) as avg_detections
                 FROM detections
             """) as cursor:
-                avg_poses = (await cursor.fetchone())[0]
+                avg_detections = (await cursor.fetchone())[0]
             
             return {
                 "total_detections": total_detections,
@@ -190,5 +185,5 @@ class PoseDatabase:
                     "start": time_range[0] if time_range[0] else None,
                     "end": time_range[1] if time_range[1] else None
                 },
-                "average_poses_per_detection": avg_poses or 0
+                "average_detections_per_frame": avg_detections or 0
             } 
