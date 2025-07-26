@@ -30,6 +30,10 @@ jobs:
         run: |
           rye sync --no-lock
 
+      - name: Ensure pip is available
+        run: |
+          rye run python -m ensurepip --upgrade
+
       - name: Use CPU-only Torch
         run: |
           rye run python -m pip install --no-deps torch==2.7.1+cpu torchvision==0.22.1+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
