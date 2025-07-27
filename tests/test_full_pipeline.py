@@ -27,6 +27,8 @@ def _get_free_port() -> int:
         return s.getsockname()[1]
 
 
+
+
 MEDIA_PORT = _get_free_port()
 API_PORT = _get_free_port()
 RTSP_URL = f"rtsp://localhost:{MEDIA_PORT}/test"
@@ -46,9 +48,18 @@ def wait_for_condition(condition_func, timeout=15, check_interval=0.5):
 def mediamtx_server() -> None:
     """Start MediaMTX server with a minimal config."""
     config_content = f"""
+# Minimal RTSP-only configuration
 rtspAddress: :{MEDIA_PORT}
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+rtspTransports: [tcp]
 api: yes
 apiAddress: :{API_PORT}
+metrics: no
+pprof: no
+logLevel: info
 paths:
   all:
     source: publisher
@@ -56,6 +67,19 @@ paths:
     cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False)
     cfg.write(config_content)
     cfg.close()
+    
+    # Check if ports are already in use
+    def port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("localhost", port))
+                return False
+            except OSError:
+                return True
+
+    if port_in_use(MEDIA_PORT) or port_in_use(API_PORT):
+        raise RuntimeError(f"Ports {MEDIA_PORT} or {API_PORT} are already in use")
+    
     process = subprocess.Popen([
         "mediamtx",
         cfg.name,
@@ -68,7 +92,14 @@ paths:
         except Exception:
             return False
 
-    assert wait_for_condition(api_ready), "MediaMTX failed to start"
+    if not wait_for_condition(api_ready):
+        # Get MediaMTX output for debugging
+        stdout, stderr = process.communicate(timeout=1)
+        logger.error(f"MediaMTX stdout: {stdout.decode()}")
+        logger.error(f"MediaMTX stderr: {stderr.decode()}")
+        process.kill()
+        raise RuntimeError("MediaMTX failed to start - check if MediaMTX is properly installed")
+    
     yield
     process.terminate()
     try:
@@ -81,13 +112,17 @@ paths:
 @pytest.fixture(scope="session")
 def ffmpeg_stream(mediamtx_server):
     """Stream a short video to MediaMTX via FFmpeg."""
+    video_file = "testdata/3327806-hd_1920_1080_24fps.mp4"
+    if not os.path.exists(video_file):
+        raise FileNotFoundError(f"Test video file {video_file} not found")
+    
     cmd = [
         "ffmpeg",
         "-re",
         "-stream_loop",
         "-1",
         "-i",
-        "testdata/3327806-hd_1920_1080_24fps.mp4",
+        video_file,
         "-c:v",
         "libx264",
         "-preset",
@@ -111,7 +146,14 @@ def ffmpeg_stream(mediamtx_server):
             cap.release()
         return ok
 
-    assert wait_for_condition(ready), "FFmpeg failed to start"
+    if not wait_for_condition(ready):
+        # Get FFmpeg output for debugging
+        stdout, stderr = process.communicate(timeout=1)
+        logger.error(f"FFmpeg stdout: {stdout.decode()}")
+        logger.error(f"FFmpeg stderr: {stderr.decode()}")
+        process.kill()
+        raise RuntimeError("FFmpeg failed to start streaming")
+    
     yield
     process.terminate()
     try:
@@ -123,11 +165,11 @@ def ffmpeg_stream(mediamtx_server):
 @pytest.fixture(scope="session")
 def yolo_model():
     if YOLO is None:
-        pytest.skip("ultralytics not available")
+        raise ImportError("ultralytics not available")
     try:
         return YOLO("yolov8n-pose.pt")
     except Exception as e:  # pragma: no cover - network failure etc
-        pytest.skip(f"YOLO model unavailable: {e}")
+        raise RuntimeError(f"YOLO model unavailable: {e}")
 
 
 def test_rtsp_stream_and_detection(ffmpeg_stream, yolo_model):
