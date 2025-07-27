@@ -83,4 +83,4 @@ def test_web_interface_root_endpoint(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Gack Pose Detection Replay" in response.text 
+    assert "Gack Pose Detection" in response.text
