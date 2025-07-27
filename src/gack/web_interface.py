@@ -20,118 +20,53 @@ app = FastAPI(lifespan=lifespan)
 async def root():
     return """
     <!DOCTYPE html>
-    <html>
+    <html lang="en" data-bs-theme="dark">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Gack Pose Detection</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
         <style>
-            body { 
-                font-family: Arial, sans-serif; 
-                background-color: #1a1a1a; 
-                color: #ffffff; 
-                margin: 0; 
-                padding: 20px;
-            }
-            
-            .header {
-                background: #2c3e50;
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-            }
-            
-            .tabs {
-                display: flex;
-                background: #2c2c2c;
-                border: 1px solid #34495e;
-                border-radius: 8px 8px 0 0;
-                margin-bottom: 0;
-            }
-            
-            .tab {
-                background: #34495e;
-                border: none;
-                color: #ecf0f1;
-                padding: 12px 24px;
-                cursor: pointer;
-                border-radius: 0;
-                flex: 1;
-                font-size: 14px;
-                font-weight: 500;
-            }
-            
-            .tab.active {
-                background: #2c2c2c;
-                color: #ffffff;
-                border-bottom: 3px solid #3498db;
-            }
-            
-            .tab:hover:not(.active) {
-                background: #2c3e50;
-            }
-            
-            .tab-content {
-                background: #2c2c2c;
-                border: 1px solid #34495e;
-                border-top: none;
-                border-radius: 0 0 8px 8px;
-                padding: 20px;
-                margin-bottom: 120px;
-                min-height: 200px;
-            }
-            
-            .tab-pane {
-                display: none;
-            }
-            
-            .tab-pane.active {
-                display: block;
-            }
-            
-            .stats {
-                background: #2c2c2c;
-                border: 1px solid #34495e;
-                border-radius: 8px;
-                padding: 15px;
-            }
-            
             .camera-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-                gap: 20px;
-                margin-bottom: 20px;
+                gap: 1rem;
+                margin-bottom: 1rem;
             }
             
             .camera-cell {
-                background: #2c2c2c;
-                border: 1px solid #34495e;
-                border-radius: 8px;
+                background: var(--bs-body-bg);
+                border: 1px solid var(--bs-border-color);
+                border-radius: 0.375rem;
                 overflow: hidden;
             }
             
             .camera-header {
-                background: #34495e;
-                padding: 10px;
+                background: var(--bs-secondary-bg);
+                padding: 0.75rem;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                border-bottom: 1px solid var(--bs-border-color);
             }
             
             .camera-canvas-container {
                 position: relative;
                 background: #000;
-                padding: 10px;
+                padding: 0.75rem;
                 text-align: center;
             }
             
             .timestamp-overlay {
                 position: absolute;
-                top: 10px;
-                left: 10px;
+                top: 0.75rem;
+                left: 0.75rem;
                 background: rgba(0, 0, 0, 0.8);
                 color: #ffffff;
-                padding: 5px 10px;
-                border-radius: 4px;
-                font-size: 12px;
+                padding: 0.25rem 0.5rem;
+                border-radius: 0.25rem;
+                font-size: 0.75rem;
                 z-index: 10;
             }
             
@@ -139,14 +74,14 @@ async def root():
                 width: 100%;
                 max-width: 640px;
                 height: 480px;
-                border: 1px solid #34495e;
-                border-radius: 4px;
+                border: 1px solid var(--bs-border-color);
+                border-radius: 0.25rem;
             }
             
             .timeline {
-                background: #2c2c2c;
-                border-top: 2px solid #34495e;
-                padding: 15px;
+                background: var(--bs-secondary-bg);
+                border-top: 2px solid var(--bs-border-color);
+                padding: 1rem;
                 position: fixed;
                 bottom: 0;
                 left: 0;
@@ -156,17 +91,19 @@ async def root():
             
             .timeline-controls {
                 display: flex;
-                gap: 10px;
+                gap: 0.5rem;
                 align-items: center;
-                margin-bottom: 10px;
+                margin-bottom: 0.5rem;
+                flex-wrap: wrap;
             }
             
             .timeline-track {
                 height: 40px;
-                background: #34495e;
-                border-radius: 4px;
+                background: var(--bs-tertiary-bg);
+                border-radius: 0.25rem;
                 position: relative;
                 cursor: pointer;
+                border: 1px solid var(--bs-border-color);
             }
             
             .timeline-marker {
@@ -174,79 +111,179 @@ async def root():
                 top: 0;
                 width: 2px;
                 height: 100%;
-                background: #e74c3c;
+                background: var(--bs-danger);
                 z-index: 10;
             }
             
             .detection-segment {
                 position: absolute;
                 height: 100%;
-                background: #3498db;
-                border-radius: 4px;
+                background: var(--bs-primary);
+                border-radius: 0.25rem;
                 opacity: 0.8;
                 cursor: pointer;
             }
             
-            .btn {
-                background: #3498db;
-                border: none;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 4px;
-                cursor: pointer;
+            .detection-segment:hover {
+                opacity: 1;
             }
             
-            .btn:hover { background: #2980b9; }
-            .btn-success { background: #27ae60; }
-            .btn-success:hover { background: #229954; }
+            .filter-bar {
+                background-color: var(--bs-secondary-bg);
+                padding: 1rem;
+                margin-bottom: 1rem;
+                border-radius: 0.375rem;
+                border: 1px solid var(--bs-border-color);
+            }
             
-            input[type="datetime-local"] {
-                background: #34495e;
-                border: 1px solid #2c3e50;
-                color: #ecf0f1;
-                border-radius: 4px;
-                padding: 8px;
+            .time-range-inputs {
+                display: flex;
+                gap: 0.5rem;
+                align-items: center;
+            }
+            
+            .time-range-inputs input {
+                width: 120px;
+            }
+            
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 1rem;
+            }
+            
+            .stat-card {
+                background: var(--bs-body-bg);
+                border: 1px solid var(--bs-border-color);
+                border-radius: 0.375rem;
+                padding: 1rem;
+                text-align: center;
+            }
+            
+            .stat-value {
+                font-size: 2rem;
+                font-weight: bold;
+                color: var(--bs-primary);
+            }
+            
+            .stat-label {
+                color: var(--bs-secondary-color);
+                font-size: 0.875rem;
             }
         </style>
     </head>
     <body>
-        <div class="header">
-            <h1>Gack Pose Detection Console</h1>
-        </div>
-        
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('cameras')">Cameras</button>
-            <button class="tab" onclick="switchTab('stats')">System Stats</button>
-        </div>
-        
-        <div class="tab-content">
-            <div id="cameras-tab" class="tab-pane active">
-                <div class="camera-grid" id="cameraGrid"></div>
+        <nav class="navbar navbar-expand-lg border-bottom mb-4">
+            <div class="container">
+                <a class="navbar-brand" href="/">Gack Pose Detection</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/">Cameras</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" onclick="switchTab('stats')">System Stats</a>
+                        </li>
+                    </ul>
+                    <ul class="navbar-nav ms-auto">
+                        <li class="nav-item">
+                            <button class="btn btn-link nav-link" id="theme-toggle">
+                                <i class="bi bi-moon-fill" id="theme-icon"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </div>
             </div>
-            
-            <div id="stats-tab" class="tab-pane">
-                <div class="stats" id="stats">
-                    <h3>System Statistics</h3>
-                    <div id="stats-content">Loading...</div>
+        </nav>
+
+        <div class="container mt-4">
+            <div class="row mb-4">
+                <div class="col">
+                    <h1>Pose Detection Console</h1>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col">
+                    <div class="filter-bar">
+                        <form id="filter-form" class="row g-3">
+                            <div class="col-md-3">
+                                <label for="camera-filter" class="form-label">Camera</label>
+                                <select class="form-select" id="camera-filter">
+                                    <option value="">All Cameras</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="start-time" class="form-label">Start Time</label>
+                                <input type="datetime-local" class="form-control" id="start-time">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="end-time" class="form-label">End Time</label>
+                                <input type="datetime-local" class="form-control" id="end-time">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">&nbsp;</label>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-primary" onclick="loadByTimeRange()">Load Range</button>
+                                    <button type="button" class="btn btn-secondary" onclick="resetFilters()">Reset</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content">
+                <div id="cameras-tab" class="tab-pane active">
+                    <div class="camera-grid" id="cameraGrid">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="stats-tab" class="tab-pane" style="display: none;">
+                    <div class="stats-grid" id="stats">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         
         <div class="timeline">
             <div class="timeline-controls">
-                <button class="btn" id="liveButton" onclick="toggleLiveMode()">
+                <button class="btn btn-success" id="liveButton" onclick="toggleLiveMode()">
+                    <i class="bi bi-broadcast"></i>
                     <span id="liveButtonText">Live</span>
                 </button>
-                <button class="btn" onclick="loadTimelineData()">Refresh</button>
-                <input type="datetime-local" id="startTime">
-                <input type="datetime-local" id="endTime">
-                <button class="btn" onclick="loadByTimeRange()">Load Range</button>
+                <button class="btn btn-outline-secondary" onclick="loadTimelineData()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                    Refresh
+                </button>
+                <span class="text-muted">|</span>
+                <span class="text-muted">Timeline Controls</span>
             </div>
             <div class="timeline-track" id="timelineTrack">
                 <div class="timeline-marker" id="timelineMarker" style="left: 50%;"></div>
             </div>
         </div>
         
+        <footer class="footer mt-4 py-3 border-top">
+            <div class="container text-center">
+                <span class="text-muted">Gack Pose Detection System - Real-time pose detection and analysis</span>
+            </div>
+        </footer>
+        
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             let cameras = [];
             let timelineData = [];
@@ -257,17 +294,24 @@ async def root():
             let isLiveMode = true;
             
             function switchTab(tabName) {
-                // Update tab buttons
-                document.querySelectorAll('.tab').forEach(tab => {
-                    tab.classList.remove('active');
+                // Hide all tab panes
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.style.display = 'none';
+                });
+                
+                // Show selected tab pane
+                document.getElementById(tabName + '-tab').style.display = 'block';
+                
+                // Update navigation
+                document.querySelectorAll('.nav-link').forEach(link => {
+                    link.classList.remove('active');
                 });
                 event.target.classList.add('active');
                 
-                // Update tab content
-                document.querySelectorAll('.tab-pane').forEach(pane => {
-                    pane.classList.remove('active');
-                });
-                document.getElementById(tabName + '-tab').classList.add('active');
+                // Load data for the tab
+                if (tabName === 'stats') {
+                    loadStats();
+                }
             }
             
             async function initApp() {
@@ -281,16 +325,31 @@ async def root():
             async function loadStats() {
                 try {
                     const stats = await fetch('/api/stats').then(r => r.json());
-                    document.getElementById('stats-content').innerHTML = `
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
-                            <div><h4>${stats.total_detections}</h4><small>Total Detections</small></div>
-                            <div><h4>${stats.average_detections_per_frame.toFixed(2)}</h4><small>Avg per Frame</small></div>
-                            <div><h4>${stats.date_range.start ? new Date(stats.date_range.start).toLocaleDateString() : 'N/A'}</h4><small>Start Date</small></div>
-                            <div><h4>${stats.date_range.end ? new Date(stats.date_range.end).toLocaleDateString() : 'N/A'}</h4><small>End Date</small></div>
+                    document.getElementById('stats').innerHTML = `
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.total_detections}</div>
+                            <div class="stat-label">Total Detections</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.average_detections_per_frame.toFixed(2)}</div>
+                            <div class="stat-label">Avg per Frame</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.date_range.start ? new Date(stats.date_range.start).toLocaleDateString() : 'N/A'}</div>
+                            <div class="stat-label">Start Date</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${stats.date_range.end ? new Date(stats.date_range.end).toLocaleDateString() : 'N/A'}</div>
+                            <div class="stat-label">End Date</div>
                         </div>
                     `;
                 } catch (error) {
                     console.error('Error loading stats:', error);
+                    document.getElementById('stats').innerHTML = `
+                        <div class="alert alert-danger" role="alert">
+                            Error loading statistics. Please try refreshing the page.
+                        </div>
+                    `;
                 }
             }
             
@@ -298,6 +357,7 @@ async def root():
                 try {
                     cameras = await fetch('/api/cameras').then(r => r.json());
                     renderCameraGrid();
+                    updateCameraFilter();
                 } catch (error) {
                     console.error('Error loading cameras:', error);
                     cameras = [];
@@ -305,13 +365,48 @@ async def root():
                 }
             }
             
+            function updateCameraFilter() {
+                const select = document.getElementById('camera-filter');
+                const currentValue = select.value;
+                
+                // Clear existing options except "All Cameras"
+                while (select.options.length > 1) {
+                    select.remove(1);
+                }
+
+                // Add new options
+                cameras.forEach(camera => {
+                    const option = new Option(camera.name, camera.name);
+                    select.add(option);
+                });
+
+                // Restore previous selection if it still exists
+                if (currentValue) {
+                    const cameraExists = cameras.some(camera => camera.name === currentValue);
+                    if (cameraExists) {
+                        select.value = currentValue;
+                    }
+                }
+            }
+            
             function renderCameraGrid() {
                 const grid = document.getElementById('cameraGrid');
+                if (cameras.length === 0) {
+                    grid.innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-info" role="alert">
+                                No cameras available. Please check your configuration.
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+                
                 grid.innerHTML = cameras.map(camera => `
                     <div class="camera-cell">
                         <div class="camera-header">
-                            <h4>${camera.name}</h4>
-                            <span>${camera.status}</span>
+                            <h5 class="mb-0">${camera.name}</h5>
+                            <span class="badge bg-${camera.status === 'active' ? 'success' : 'secondary'}">${camera.status}</span>
                         </div>
                         <div class="camera-canvas-container">
                             <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
@@ -573,7 +668,7 @@ async def root():
                     liveButtonText.textContent = 'Live';
                     startLiveStream();
                 } else {
-                    liveButton.className = 'btn';
+                    liveButton.className = 'btn btn-outline-secondary';
                     liveButtonText.textContent = 'Timeline';
                     stopLiveStream();
                 }
@@ -582,6 +677,7 @@ async def root():
             async function loadByTimeRange() {
                 const startTime = document.getElementById('startTime').value;
                 const endTime = document.getElementById('endTime').value;
+                const cameraFilter = document.getElementById('camera-filter').value;
                 
                 if (!startTime || !endTime) {
                     alert('Please select both start and end times');
@@ -589,7 +685,17 @@ async def root():
                 }
                 
                 try {
-                    timelineData = await fetch(`/api/detections/timerange?start_time=${startTime}&end_time=${endTime}&limit=1000`).then(r => r.json());
+                    const params = new URLSearchParams({
+                        start_time: startTime,
+                        end_time: endTime,
+                        limit: '1000'
+                    });
+                    
+                    if (cameraFilter) {
+                        params.append('camera_name', cameraFilter);
+                    }
+                    
+                    timelineData = await fetch(`/api/detections/timerange?${params.toString()}`).then(r => r.json());
                     renderTimeline();
                     isLiveMode = false;
                     toggleLiveMode();
@@ -598,7 +704,75 @@ async def root():
                 }
             }
             
-            document.addEventListener('DOMContentLoaded', initApp);
+            function resetFilters() {
+                document.getElementById('camera-filter').value = '';
+                document.getElementById('start-time').value = '';
+                document.getElementById('end-time').value = '';
+                loadTimelineData();
+            }
+            
+            // Theme toggle functionality
+            document.addEventListener('DOMContentLoaded', function() {
+                const themeToggle = document.getElementById('theme-toggle');
+                const themeIcon = document.getElementById('theme-icon');
+                const htmlElement = document.documentElement;
+                
+                // Check if system prefers dark mode
+                const prefersDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                
+                // Check if theme preference is stored in localStorage
+                const savedTheme = localStorage.getItem('theme');
+                
+                if (savedTheme) {
+                    // Use saved preference if available
+                    htmlElement.setAttribute('data-bs-theme', savedTheme);
+                    updateThemeIcon(savedTheme);
+                } else {
+                    // Use system preference if no saved preference
+                    const systemTheme = prefersDarkMode ? 'dark' : 'light';
+                    htmlElement.setAttribute('data-bs-theme', systemTheme);
+                    updateThemeIcon(systemTheme);
+                }
+                
+                // Watch for system theme changes
+                if (window.matchMedia) {
+                    const colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                    
+                    colorSchemeQuery.addEventListener('change', (e) => {
+                        // Only update if user hasn't set a preference
+                        if (!localStorage.getItem('theme')) {
+                            const newTheme = e.matches ? 'dark' : 'light';
+                            htmlElement.setAttribute('data-bs-theme', newTheme);
+                            updateThemeIcon(newTheme);
+                        }
+                    });
+                }
+                
+                // Toggle theme when button is clicked
+                themeToggle.addEventListener('click', function() {
+                    const currentTheme = htmlElement.getAttribute('data-bs-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    
+                    htmlElement.setAttribute('data-bs-theme', newTheme);
+                    localStorage.setItem('theme', newTheme);
+                    
+                    updateThemeIcon(newTheme);
+                });
+                
+                // Update the icon based on current theme
+                function updateThemeIcon(theme) {
+                    if (theme === 'dark') {
+                        themeIcon.classList.remove('bi-sun-fill');
+                        themeIcon.classList.add('bi-moon-fill');
+                    } else {
+                        themeIcon.classList.remove('bi-moon-fill');
+                        themeIcon.classList.add('bi-sun-fill');
+                    }
+                }
+                
+                // Initialize the application
+                initApp();
+            });
         </script>
     </body>
     </html>
@@ -622,7 +796,7 @@ async def get_latest_detections(camera_name: str = Query(...), limit: int = Quer
 
 @app.get("/api/detections/timerange")
 async def get_detections_by_timerange(
-    camera_name: str = Query(...),
+    camera_name: Optional[str] = Query(None),
     start_time: str = Query(...),
     end_time: str = Query(...),
     limit: Optional[int] = Query(50, ge=1, le=1000)
