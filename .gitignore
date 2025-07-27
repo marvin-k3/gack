@@ -16,3 +16,4 @@ outdata/
 
 # OS generated files
 .DS_Store
+yolov8n-pose.pt
