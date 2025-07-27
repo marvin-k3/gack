@@ -39,19 +39,66 @@ async def root():
                 margin-bottom: 20px;
             }
             
+            .tabs {
+                display: flex;
+                background: #2c2c2c;
+                border: 1px solid #34495e;
+                border-radius: 8px 8px 0 0;
+                margin-bottom: 0;
+            }
+            
+            .tab {
+                background: #34495e;
+                border: none;
+                color: #ecf0f1;
+                padding: 12px 24px;
+                cursor: pointer;
+                border-radius: 0;
+                flex: 1;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            
+            .tab.active {
+                background: #2c2c2c;
+                color: #ffffff;
+                border-bottom: 3px solid #3498db;
+            }
+            
+            .tab:hover:not(.active) {
+                background: #2c3e50;
+            }
+            
+            .tab-content {
+                background: #2c2c2c;
+                border: 1px solid #34495e;
+                border-top: none;
+                border-radius: 0 0 8px 8px;
+                padding: 20px;
+                margin-bottom: 120px;
+                min-height: 200px;
+            }
+            
+            .tab-pane {
+                display: none;
+            }
+            
+            .tab-pane.active {
+                display: block;
+            }
+            
             .stats {
                 background: #2c2c2c;
                 border: 1px solid #34495e;
                 border-radius: 8px;
                 padding: 15px;
-                margin-bottom: 20px;
             }
             
             .camera-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
                 gap: 20px;
-                margin-bottom: 120px;
+                margin-bottom: 20px;
             }
             
             .camera-cell {
@@ -167,12 +214,23 @@ async def root():
             <h1>Gack Pose Detection Console</h1>
         </div>
         
-        <div class="stats" id="stats">
-            <h3>System Statistics</h3>
-            <div id="stats-content">Loading...</div>
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('cameras')">Cameras</button>
+            <button class="tab" onclick="switchTab('stats')">System Stats</button>
         </div>
         
-        <div class="camera-grid" id="cameraGrid"></div>
+        <div class="tab-content">
+            <div id="cameras-tab" class="tab-pane active">
+                <div class="camera-grid" id="cameraGrid"></div>
+            </div>
+            
+            <div id="stats-tab" class="tab-pane">
+                <div class="stats" id="stats">
+                    <h3>System Statistics</h3>
+                    <div id="stats-content">Loading...</div>
+                </div>
+            </div>
+        </div>
         
         <div class="timeline">
             <div class="timeline-controls">
@@ -197,6 +255,20 @@ async def root():
             let timelineEnd = null;
             let liveStreamInterval = null;
             let isLiveMode = true;
+            
+            function switchTab(tabName) {
+                // Update tab buttons
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                
+                // Update tab content
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.remove('active');
+                });
+                document.getElementById(tabName + '-tab').classList.add('active');
+            }
             
             async function initApp() {
                 await loadStats();
