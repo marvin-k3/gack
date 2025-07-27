@@ -31,37 +31,30 @@ async def root():
             .camera-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-                gap: 1rem;
+                gap: 0;
                 margin-bottom: 1rem;
             }
             
             .camera-cell {
-                background: var(--bs-body-bg);
+                background: #000;
                 border: 1px solid var(--bs-border-color);
-                border-radius: 0.375rem;
+                border-radius: 0;
                 overflow: hidden;
-            }
-            
-            .camera-header {
-                background: var(--bs-secondary-bg);
-                padding: 0.75rem;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                border-bottom: 1px solid var(--bs-border-color);
+                position: relative;
             }
             
             .camera-canvas-container {
                 position: relative;
                 background: #000;
-                padding: 0.75rem;
                 text-align: center;
+                width: 100%;
+                height: 100%;
             }
             
             .timestamp-overlay {
                 position: absolute;
-                top: 0.75rem;
-                left: 0.75rem;
+                top: 0.5rem;
+                left: 0.5rem;
                 background: rgba(0, 0, 0, 0.8);
                 color: #ffffff;
                 padding: 0.25rem 0.5rem;
@@ -70,12 +63,23 @@ async def root():
                 z-index: 10;
             }
             
+            .camera-name-overlay {
+                position: absolute;
+                bottom: 0.5rem;
+                left: 0.5rem;
+                background: rgba(0, 0, 0, 0.8);
+                color: #ffffff;
+                padding: 0.25rem 0.5rem;
+                border-radius: 0.25rem;
+                font-size: 0.875rem;
+                font-weight: bold;
+                z-index: 10;
+            }
+            
             .camera-canvas {
                 width: 100%;
-                max-width: 640px;
-                height: 480px;
-                border: 1px solid var(--bs-border-color);
-                border-radius: 0.25rem;
+                height: 100%;
+                display: block;
             }
             
             .timeline {
@@ -404,12 +408,9 @@ async def root():
                 
                 grid.innerHTML = cameras.map(camera => `
                     <div class="camera-cell">
-                        <div class="camera-header">
-                            <h5 class="mb-0">${camera.name}</h5>
-                            <span class="badge bg-${camera.status === 'active' ? 'success' : 'secondary'}">${camera.status}</span>
-                        </div>
                         <div class="camera-canvas-container">
                             <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
+                            <div class="camera-name-overlay">${camera.name}</div>
                             <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="480"></canvas>
                         </div>
                     </div>
