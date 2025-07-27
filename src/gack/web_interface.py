@@ -411,7 +411,7 @@ async def root():
                         <div class="camera-canvas-container">
                             <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
                             <div class="camera-name-overlay">${camera.name}</div>
-                            <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="480"></canvas>
+                            <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="360"></canvas>
                         </div>
                     </div>
                 `).join('');
