@@ -4,9 +4,44 @@ import uvicorn
 from typing import Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
+import subprocess
+import os
 from gack.database import PoseDatabase
 
 db = PoseDatabase()
+
+def get_version_info():
+    """Get version information including git branch and commit."""
+    version_info = {
+        "version": "0.1.0",  # From pyproject.toml
+        "branch": "unknown",
+        "commit": "unknown",
+        "commit_short": "unknown"
+    }
+    
+    try:
+        # Get git branch
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        )
+        if result.returncode == 0:
+            version_info["branch"] = result.stdout.strip()
+        
+        # Get full commit hash
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        )
+        if result.returncode == 0:
+            version_info["commit"] = result.stdout.strip()
+            version_info["commit_short"] = version_info["commit"][:8]
+        
+    except (subprocess.SubprocessError, FileNotFoundError):
+        # Git not available or not a git repository
+        pass
+    
+    return version_info
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,7 +59,7 @@ async def root():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Gack Pose Detection</title>
+        <title>Gack</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
         <style>
@@ -174,12 +209,24 @@ async def root():
                 color: var(--bs-secondary-color);
                 font-size: 0.875rem;
             }
+            
+            .footer {
+                background-color: var(--bs-secondary-bg);
+                border-top: 1px solid var(--bs-border-color);
+            }
+            
+            .footer code {
+                background-color: var(--bs-tertiary-bg);
+                padding: 0.125rem 0.25rem;
+                border-radius: 0.25rem;
+                font-size: 0.75rem;
+            }
         </style>
     </head>
     <body>
         <nav class="navbar navbar-expand-lg border-bottom mb-4">
             <div class="container">
-                <a class="navbar-brand" href="/">Gack Pose Detection</a>
+                <a class="navbar-brand" href="/">Gack</a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
@@ -204,12 +251,6 @@ async def root():
         </nav>
 
         <div class="container mt-4">
-            <div class="row mb-4">
-                <div class="col">
-                    <h1>Pose Detection Console</h1>
-                </div>
-            </div>
-
             <div class="row mb-4">
                 <div class="col">
                     <div class="filter-bar">
@@ -284,6 +325,8 @@ async def root():
         <footer class="footer mt-4 py-3 border-top">
             <div class="container text-center">
                 <span class="text-muted">Gack Pose Detection System - Real-time pose detection and analysis</span>
+                <br>
+                <small class="text-muted" id="version-info">Loading version info...</small>
             </div>
         </footer>
         
@@ -322,8 +365,24 @@ async def root():
                 await loadStats();
                 await loadCameras();
                 await loadTimelineData();
+                await loadVersionInfo();
                 setupTimelineInteraction();
                 startLiveStream();
+            }
+            
+            async function loadVersionInfo() {
+                try {
+                    const versionInfo = await fetch('/api/version').then(r => r.json());
+                    const versionElement = document.getElementById('version-info');
+                    versionElement.innerHTML = `
+                        v${versionInfo.version} | 
+                        <span class="badge bg-secondary">${versionInfo.branch}</span> | 
+                        <code class="text-muted">${versionInfo.commit_short}</code>
+                    `;
+                } catch (error) {
+                    console.error('Error loading version info:', error);
+                    document.getElementById('version-info').textContent = 'Version info unavailable';
+                }
             }
             
             async function loadStats() {
@@ -832,6 +891,10 @@ async def get_detection(detection_id: int):
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
     return detection
+
+@app.get("/api/version")
+async def get_version():
+    return get_version_info()
 
 def run_web_interface(host: str = "0.0.0.0", port: int = 8000):
     uvicorn.run(app, host=host, port=port)
