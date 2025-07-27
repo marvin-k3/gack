@@ -68,6 +68,13 @@ async def root():
                 grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
                 gap: 0;
                 margin-bottom: 1rem;
+                width: 100%;
+            }
+            
+            @media (max-width: 800px) {
+                .camera-grid {
+                    grid-template-columns: 1fr;
+                }
             }
             
             .camera-cell {
@@ -76,6 +83,9 @@ async def root():
                 border-radius: 0;
                 overflow: hidden;
                 position: relative;
+                aspect-ratio: 16/9;
+                min-height: 300px;
+                min-width: 0;
             }
             
             .camera-canvas-container {
@@ -115,6 +125,7 @@ async def root():
                 width: 100%;
                 height: 100%;
                 display: block;
+                object-fit: contain;
             }
             
             .timeline {
@@ -250,26 +261,26 @@ async def root():
             </div>
         </nav>
 
-        <div class="container mt-4">
+        <div class="container-fluid mt-4 px-3">
             <div class="row mb-4">
                 <div class="col">
                     <div class="filter-bar">
                         <form id="filter-form" class="row g-3">
-                            <div class="col-md-3">
+                            <div class="col-lg-3 col-md-6">
                                 <label for="camera-filter" class="form-label">Camera</label>
                                 <select class="form-select" id="camera-filter">
                                     <option value="">All Cameras</option>
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-lg-3 col-md-6">
                                 <label for="start-time" class="form-label">Start Time</label>
                                 <input type="datetime-local" class="form-control" id="start-time">
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-lg-3 col-md-6">
                                 <label for="end-time" class="form-label">End Time</label>
                                 <input type="datetime-local" class="form-control" id="end-time">
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-lg-3 col-md-6">
                                 <label class="form-label">&nbsp;</label>
                                 <div class="d-flex gap-2">
                                     <button type="button" class="btn btn-primary" onclick="loadByTimeRange()">Load Range</button>
@@ -323,7 +334,7 @@ async def root():
         </div>
         
         <footer class="footer mt-4 py-3 border-top">
-            <div class="container text-center">
+            <div class="container-fluid text-center">
                 <span class="text-muted">Gack Pose Detection System - Real-time pose detection and analysis</span>
                 <br>
                 <small class="text-muted" id="version-info">Loading version info...</small>
@@ -470,10 +481,22 @@ async def root():
                         <div class="camera-canvas-container">
                             <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
                             <div class="camera-name-overlay">${camera.name}</div>
-                            <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="360"></canvas>
+                            <canvas id="canvas_${camera.name}" class="camera-canvas"></canvas>
                         </div>
                     </div>
                 `).join('');
+                
+                // Set canvas dimensions after rendering
+                setTimeout(() => {
+                    cameras.forEach(camera => {
+                        const canvas = document.getElementById(`canvas_${camera.name}`);
+                        if (canvas) {
+                            const container = canvas.parentElement;
+                            canvas.width = container.clientWidth;
+                            canvas.height = container.clientHeight;
+                        }
+                    });
+                }, 100);
             }
             
             function startLiveStream() {
@@ -830,8 +853,20 @@ async def root():
                     }
                 }
                 
-                // Initialize the application
-                initApp();
+                            // Initialize the application
+            initApp();
+            
+            // Handle window resize to update canvas dimensions
+            window.addEventListener('resize', () => {
+                cameras.forEach(camera => {
+                    const canvas = document.getElementById(`canvas_${camera.name}`);
+                    if (canvas) {
+                        const container = canvas.parentElement;
+                        canvas.width = container.clientWidth;
+                        canvas.height = container.clientHeight;
+                    }
+                });
+            });
             });
         </script>
     </body>
