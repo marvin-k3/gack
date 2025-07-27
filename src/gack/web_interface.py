@@ -6,12 +6,10 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from gack.database import PoseDatabase
 
-# Initialize database
 db = PoseDatabase()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager for FastAPI app."""
     await db.init_db()
     yield
     await db.close()
@@ -20,7 +18,6 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Serve the main HTML interface."""
     return """
     <!DOCTYPE html>
     <html>
@@ -152,17 +149,9 @@ async def root():
                 cursor: pointer;
             }
             
-            .btn:hover {
-                background: #2980b9;
-            }
-            
-            .btn-success {
-                background: #27ae60;
-            }
-            
-            .btn-success:hover {
-                background: #229954;
-            }
+            .btn:hover { background: #2980b9; }
+            .btn-success { background: #27ae60; }
+            .btn-success:hover { background: #229954; }
             
             input[type="datetime-local"] {
                 background: #34495e;
@@ -183,9 +172,7 @@ async def root():
             <div id="stats-content">Loading...</div>
         </div>
         
-        <div class="camera-grid" id="cameraGrid">
-            <!-- Cameras will be inserted here -->
-        </div>
+        <div class="camera-grid" id="cameraGrid"></div>
         
         <div class="timeline">
             <div class="timeline-controls">
@@ -221,27 +208,13 @@ async def root():
             
             async function loadStats() {
                 try {
-                    const response = await fetch('/api/stats');
-                    const stats = await response.json();
-                    
+                    const stats = await fetch('/api/stats').then(r => r.json());
                     document.getElementById('stats-content').innerHTML = `
                         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
-                            <div>
-                                <h4>${stats.total_detections}</h4>
-                                <small>Total Detections</small>
-                            </div>
-                            <div>
-                                <h4>${stats.average_detections_per_frame.toFixed(2)}</h4>
-                                <small>Avg per Frame</small>
-                            </div>
-                            <div>
-                                <h4>${stats.date_range.start ? new Date(stats.date_range.start).toLocaleDateString() : 'N/A'}</h4>
-                                <small>Start Date</small>
-                            </div>
-                            <div>
-                                <h4>${stats.date_range.end ? new Date(stats.date_range.end).toLocaleDateString() : 'N/A'}</h4>
-                                <small>End Date</small>
-                            </div>
+                            <div><h4>${stats.total_detections}</h4><small>Total Detections</small></div>
+                            <div><h4>${stats.average_detections_per_frame.toFixed(2)}</h4><small>Avg per Frame</small></div>
+                            <div><h4>${stats.date_range.start ? new Date(stats.date_range.start).toLocaleDateString() : 'N/A'}</h4><small>Start Date</small></div>
+                            <div><h4>${stats.date_range.end ? new Date(stats.date_range.end).toLocaleDateString() : 'N/A'}</h4><small>End Date</small></div>
                         </div>
                     `;
                 } catch (error) {
@@ -251,8 +224,7 @@ async def root():
             
             async function loadCameras() {
                 try {
-                    const response = await fetch('/api/cameras');
-                    cameras = await response.json();
+                    cameras = await fetch('/api/cameras').then(r => r.json());
                     renderCameraGrid();
                 } catch (error) {
                     console.error('Error loading cameras:', error);
@@ -263,12 +235,8 @@ async def root():
             
             function renderCameraGrid() {
                 const grid = document.getElementById('cameraGrid');
-                grid.innerHTML = '';
-                
-                cameras.forEach(camera => {
-                    const cell = document.createElement('div');
-                    cell.className = 'camera-cell';
-                    cell.innerHTML = `
+                grid.innerHTML = cameras.map(camera => `
+                    <div class="camera-cell">
                         <div class="camera-header">
                             <h4>${camera.name}</h4>
                             <span>${camera.status}</span>
@@ -277,18 +245,16 @@ async def root():
                             <div class="timestamp-overlay" id="timestamp_${camera.name}">No data</div>
                             <canvas id="canvas_${camera.name}" class="camera-canvas" width="640" height="480"></canvas>
                         </div>
-                    `;
-                    grid.appendChild(cell);
-                });
+                    </div>
+                `).join('');
             }
             
             function startLiveStream() {
                 if (liveStreamInterval) clearInterval(liveStreamInterval);
-                
                 liveStreamInterval = setInterval(async () => {
                     if (isLiveMode) {
                         for (const camera of cameras) {
-                            await updateCameraLive(camera.name);
+                            await updateCamera(camera.name, 'live');
                         }
                     }
                 }, 1000);
@@ -301,35 +267,39 @@ async def root():
                 }
             }
             
-            async function updateCameraLive(cameraName) {
+            async function updateCamera(cameraName, mode = 'live') {
                 try {
-                    const response = await fetch(`/api/detections/latest?camera_name=${encodeURIComponent(cameraName)}&limit=1`);
-                    const detections = await response.json();
-                    
-                    if (detections && detections.length > 0) {
-                        const latestDetection = detections[0];
-                        const detectionTime = new Date(latestDetection.timestamp);
-                        const detectionCount = latestDetection.detection_data.detections ? latestDetection.detection_data.detections.length : 0;
-                        
-                        updateTimestampOverlay(cameraName, detectionTime, detectionCount);
-                        renderDetectionOnCanvas(cameraName, latestDetection);
+                    let response;
+                    if (mode === 'live') {
+                        response = await fetch(`/api/detections/latest?camera_name=${encodeURIComponent(cameraName)}&limit=1`);
                     } else {
-                        const now = new Date();
-                        updateTimestampOverlay(cameraName, now, 0);
+                        response = await fetch(`/api/detections/nearest?camera_name=${encodeURIComponent(cameraName)}&timestamp=${currentTime.toISOString()}&tolerance=0.1`);
+                    }
+                    
+                    const data = await response.json();
+                    const detection = Array.isArray(data) ? data[0] : data;
+                    
+                    if (detection) {
+                        const time = new Date(detection.timestamp);
+                        const detectionCount = detection.detection_data.detections?.length || 0;
+                        updateTimestampOverlay(cameraName, time, detectionCount);
+                        renderDetectionOnCanvas(cameraName, detection);
+                    } else {
+                        const time = mode === 'live' ? new Date() : currentTime;
+                        updateTimestampOverlay(cameraName, time, 0);
                         clearCanvas(cameraName);
                     }
                 } catch (error) {
                     console.error(`Error updating camera ${cameraName}:`, error);
-                    const now = new Date();
-                    updateTimestampOverlay(cameraName, now, 0);
+                    const time = mode === 'live' ? new Date() : currentTime;
+                    updateTimestampOverlay(cameraName, time, 0);
                     clearCanvas(cameraName);
                 }
             }
             
             async function loadTimelineData() {
                 try {
-                    const response = await fetch('/api/timeline');
-                    timelineData = await response.json();
+                    timelineData = await fetch('/api/timeline').then(r => r.json());
                     renderTimeline();
                 } catch (error) {
                     console.error('Error loading timeline data:', error);
@@ -338,8 +308,7 @@ async def root():
             
             function renderTimeline() {
                 const track = document.getElementById('timelineTrack');
-                const existingSegments = track.querySelectorAll('.detection-segment');
-                existingSegments.forEach(seg => seg.remove());
+                track.querySelectorAll('.detection-segment').forEach(seg => seg.remove());
                 
                 if (timelineData.length === 0) return;
                 
@@ -391,19 +360,14 @@ async def root():
             }
             
             function setupTimelineInteraction() {
-                const track = document.getElementById('timelineTrack');
-                
-                track.addEventListener('click', (e) => {
-                    const rect = track.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    const percentage = (clickX / rect.width) * 100;
+                document.getElementById('timelineTrack').addEventListener('click', (e) => {
+                    const rect = e.target.getBoundingClientRect();
+                    const percentage = ((e.clientX - rect.left) / rect.width) * 100;
                     
                     if (timelineStart && timelineEnd) {
                         const time = new Date(timelineStart.getTime() + (percentage / 100) * (timelineEnd - timelineStart));
                         jumpToTime(time);
-                        if (isLiveMode) {
-                            toggleLiveMode();
-                        }
+                        if (isLiveMode) toggleLiveMode();
                     }
                 });
             }
@@ -411,35 +375,15 @@ async def root():
             async function jumpToTime(time) {
                 currentTime = time;
                 isLiveMode = false;
-                const marker = document.getElementById('timelineMarker');
                 
+                const marker = document.getElementById('timelineMarker');
                 if (timelineStart && timelineEnd) {
                     const position = ((time - timelineStart) / (timelineEnd - timelineStart)) * 100;
                     marker.style.left = position + '%';
                 }
                 
                 for (const camera of cameras) {
-                    await updateCameraView(camera.name, time);
-                }
-            }
-            
-            async function updateCameraView(cameraName, time) {
-                try {
-                    const response = await fetch(`/api/detections/nearest?camera_name=${encodeURIComponent(cameraName)}&timestamp=${time.toISOString()}&tolerance=0.1`);
-                    const detection = await response.json();
-                    
-                    if (detection) {
-                        const detectionCount = detection.detection_data.detections ? detection.detection_data.detections.length : 0;
-                        updateTimestampOverlay(cameraName, time, detectionCount);
-                        renderDetectionOnCanvas(cameraName, detection);
-                    } else {
-                        clearCanvas(cameraName);
-                        updateTimestampOverlay(cameraName, time, 0);
-                    }
-                } catch (error) {
-                    console.error(`Error updating camera ${cameraName}:`, error);
-                    clearCanvas(cameraName);
-                    updateTimestampOverlay(cameraName, time, 0);
+                    await updateCamera(camera.name, 'timeline');
                 }
             }
             
@@ -453,11 +397,9 @@ async def root():
                 const detections = detection.detection_data.detections || [];
                 if (detections.length === 0) return;
                 
-                // Dark background
+                // Dark background and frame boundary
                 ctx.fillStyle = 'rgba(20, 20, 20, 1)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                // Frame boundary
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
                 ctx.lineWidth = 2;
                 ctx.strokeRect(0, 0, canvas.width, canvas.height);
@@ -466,38 +408,31 @@ async def root():
                 const sourceWidth = firstDetection.source_frame_width || 1920;
                 const sourceHeight = firstDetection.source_frame_height || 1080;
                 
-                const scaleX = canvas.width / sourceWidth;
-                const scaleY = canvas.height / sourceHeight;
-                const scale = Math.min(scaleX, scaleY);
-                
+                const scale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight);
                 const scaledWidth = sourceWidth * scale;
                 const scaledHeight = sourceHeight * scale;
                 const offsetX = (canvas.width - scaledWidth) / 2;
                 const offsetY = (canvas.height - scaledHeight) / 2;
                 
                 detections.forEach((personDetection) => {
-                    const conf = personDetection.confidence;
-                    const box = personDetection.bbox;
-                    const kp_conf = personDetection.keypoint_confidences;
-                    const pose = personDetection.pose;
+                    const { confidence, bbox, keypoint_confidences, pose } = personDetection;
                     
                     // Bounding box
-                    const x1 = (box[0] * scale) + offsetX;
-                    const y1 = (box[1] * scale) + offsetY;
-                    const x2 = (box[2] * scale) + offsetX;
-                    const y2 = (box[3] * scale) + offsetY;
+                    const [x1, y1, x2, y2] = bbox.map((coord, i) => 
+                        (coord * scale) + (i % 2 === 0 ? offsetX : offsetY)
+                    );
                     
-                    ctx.strokeStyle = `rgba(255, 0, 0, ${conf})`;
+                    ctx.strokeStyle = `rgba(255, 0, 0, ${confidence})`;
                     ctx.lineWidth = Math.max(1, 2 * scale);
                     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
                     
                     // Keypoints
                     pose.forEach((point, kpIndex) => {
-                        if (kp_conf[kpIndex] > 0.5) {
+                        if (keypoint_confidences[kpIndex] > 0.5) {
                             const x = (point[0] * scale) + offsetX;
                             const y = (point[1] * scale) + offsetY;
                             
-                            ctx.fillStyle = `rgba(0, 255, 0, ${kp_conf[kpIndex]})`;
+                            ctx.fillStyle = `rgba(0, 255, 0, ${keypoint_confidences[kpIndex]})`;
                             ctx.beginPath();
                             ctx.arc(x, y, Math.max(1, 3 * scale), 0, 2 * Math.PI);
                             ctx.fill();
@@ -510,12 +445,12 @@ async def root():
                         [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
                     ];
                     
-                    ctx.strokeStyle = `rgba(255, 0, 0, ${conf})`;
+                    ctx.strokeStyle = `rgba(255, 0, 0, ${confidence})`;
                     ctx.lineWidth = Math.max(1, 1.5 * scale);
                     
                     skeleton.forEach(([start, end]) => {
                         if (start < pose.length && end < pose.length && 
-                            kp_conf[start] > 0.5 && kp_conf[end] > 0.5) {
+                            keypoint_confidences[start] > 0.5 && keypoint_confidences[end] > 0.5) {
                             const x1 = (pose[start][0] * scale) + offsetX;
                             const y1 = (pose[start][1] * scale) + offsetY;
                             const x2 = (pose[end][0] * scale) + offsetX;
@@ -543,19 +478,16 @@ async def root():
                         hour12: false
                     });
                     
-                    if (detectionCount > 0) {
-                        overlay.textContent = `${formattedTime} (${detectionCount} detection${detectionCount > 1 ? 's' : ''})`;
-                    } else {
-                        overlay.textContent = formattedTime;
-                    }
+                    overlay.textContent = detectionCount > 0 
+                        ? `${formattedTime} (${detectionCount} detection${detectionCount > 1 ? 's' : ''})`
+                        : formattedTime;
                 }
             }
             
             function clearCanvas(cameraName) {
                 const canvas = document.getElementById(`canvas_${cameraName}`);
                 if (canvas) {
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
                 }
             }
             
@@ -585,8 +517,7 @@ async def root():
                 }
                 
                 try {
-                    const response = await fetch(`/api/detections/timerange?start_time=${startTime}&end_time=${endTime}&limit=1000`);
-                    timelineData = await response.json();
+                    timelineData = await fetch(`/api/detections/timerange?start_time=${startTime}&end_time=${endTime}&limit=1000`).then(r => r.json());
                     renderTimeline();
                     isLiveMode = false;
                     toggleLiveMode();
@@ -603,32 +534,27 @@ async def root():
 
 @app.get("/api/stats")
 async def get_stats():
-    """Get database statistics."""
     return await db.get_detection_stats()
 
 @app.get("/api/cameras")
 async def get_cameras():
-    """Get list of available cameras."""
     return await db.get_cameras()
 
 @app.get("/api/timeline")
-async def get_timeline(camera_name: Optional[str] = Query(None, description="Optional camera name to filter by")):
-    """Get timeline data for the timeline view."""
+async def get_timeline(camera_name: Optional[str] = Query(None)):
     return await db.get_timeline_data()
 
 @app.get("/api/detections/latest")
-async def get_latest_detections(camera_name: str = Query(..., description="Camera name to filter by"), limit: int = Query(50, ge=1, le=1000)):
-    """Get the latest detections for a specific camera."""
+async def get_latest_detections(camera_name: str = Query(...), limit: int = Query(50, ge=1, le=1000)):
     return await db.get_latest_detections(camera_name, limit)
 
 @app.get("/api/detections/timerange")
 async def get_detections_by_timerange(
-    camera_name: str = Query(..., description="Camera name to filter by"),
-    start_time: str = Query(..., description="Start time in ISO format"),
-    end_time: str = Query(..., description="End time in ISO format"),
+    camera_name: str = Query(...),
+    start_time: str = Query(...),
+    end_time: str = Query(...),
     limit: Optional[int] = Query(50, ge=1, le=1000)
 ):
-    """Get detections within a time range for a specific camera."""
     try:
         datetime.fromisoformat(start_time.replace('Z', '+00:00'))
         datetime.fromisoformat(end_time.replace('Z', '+00:00'))
@@ -639,11 +565,10 @@ async def get_detections_by_timerange(
 
 @app.get("/api/detections/nearest")
 async def get_nearest_detection(
-    camera_name: str = Query(..., description="Camera name to filter by"),
-    timestamp: str = Query(..., description="Timestamp in ISO format"),
-    tolerance: Optional[float] = Query(None, description="Tolerance in seconds - if provided, only return detection within this tolerance")
+    camera_name: str = Query(...),
+    timestamp: str = Query(...),
+    tolerance: Optional[float] = Query(None)
 ):
-    """Get the detection nearest to a specific timestamp for a camera."""
     try:
         datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
     except ValueError:
@@ -656,14 +581,12 @@ async def get_nearest_detection(
 
 @app.get("/api/detections/{detection_id}")
 async def get_detection(detection_id: int):
-    """Get a specific detection by ID."""
     detection = await db.get_detection_by_id(detection_id)
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
     return detection
 
 def run_web_interface(host: str = "0.0.0.0", port: int = 8000):
-    """Run the FastAPI web interface."""
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":
