@@ -64,6 +64,7 @@ The web interface provides:
 - `SHOW_ORIGINAL`: Show original video background (default: False)
 - `SAVE_TO_DB`: Save detections to database (default: True)
 - `LOG_LEVEL`: Logging level (default: INFO)
+- `KNOWN_FACES_DIR`: Directory of labeled face images for optional face recognition
 - `WEB_HOST`: Web interface host (default: 0.0.0.0)
 - `WEB_PORT`: Web interface port (default: 8000)
 
@@ -95,6 +96,6 @@ pytest tests/
 
 This system is designed for privacy preservation:
 - Only pose keypoints are stored, not video frames
-- No facial recognition or personal identification
+- Facial recognition is optional and disabled by default
 - Detection data can be easily deleted from the database
 - Local storage only (no cloud uploads)

@@ -12,6 +12,7 @@ import logging
 import asyncio
 from datetime import datetime
 from gack.database import PoseDatabase
+from gack.face_recog import FaceRecognizer
 import logging
 from pydantic import BaseModel
 from typing import List, Tuple, Optional
@@ -26,6 +27,7 @@ class Detection(BaseModel):
     keypoint_confidences: List[float]  # Confidence scores for each keypoint
     source_frame_width: Optional[int] = None  # Width of the source video frame
     source_frame_height: Optional[int] = None  # Height of the source video frame
+    face_name: Optional[str] = None  # Recognized face name if available
     
     @property
     def bbox_width(self) -> float:
@@ -53,8 +55,11 @@ class Detection(BaseModel):
         return sum(1 for conf in self.keypoint_confidences if conf > 0.5)
 
 
-def process_frame(frame, model, show_original=False):
-    """Run pose estimation and draw skeletons on the frame."""
+def process_frame(frame, model, show_original=False, face_recognizer: FaceRecognizer = None):
+    """Run pose estimation and draw skeletons on the frame.
+
+    Optionally perform face recognition within detected person bounding boxes.
+    """
     results = model(frame)
     poses = results[0].keypoints.xy.cpu().numpy() if results[0].keypoints is not None else []
     confidences = results[0].boxes.conf.cpu().numpy() if results[0].boxes is not None else []
@@ -85,6 +90,8 @@ def process_frame(frame, model, show_original=False):
             source_frame_width=frame_width,
             source_frame_height=frame_height
         )
+        if face_recognizer:
+            detection.face_name = face_recognizer.recognize_in_bbox(frame, bbox_tuple)
         detections.append(detection)
         
         # Log comprehensive data for each person detected
@@ -103,17 +110,22 @@ def process_frame(frame, model, show_original=False):
             (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)
         ]
         for start_idx, end_idx in skeleton:
-            if (start_idx < len(detection.pose) and end_idx < len(detection.pose) and 
+            if (start_idx < len(detection.pose) and end_idx < len(detection.pose) and
                 detection.keypoint_confidences[start_idx] > 0.5 and detection.keypoint_confidences[end_idx] > 0.5):
                 pt1 = tuple(map(int, detection.pose[start_idx]))
                 pt2 = tuple(map(int, detection.pose[end_idx]))
                 cv2.line(pose_img, pt1, pt2, (255, 0, 0), 2)
+
+        if detection.face_name:
+            x1, y1, x2, y2 = map(int, detection.bbox)
+            cv2.putText(pose_img, detection.face_name, (x1, max(0, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
     
     return pose_img, detections
 
 
 class PoseStreamer:
-    def __init__(self, model, cap, process, camera_name, fps=1, show_original=False, ffmpeg_threads=None, db=None, shutdown_event=None):
+    def __init__(self, model, cap, process, camera_name, fps=1, show_original=False, ffmpeg_threads=None, db=None, shutdown_event=None, face_recognizer=None):
         self.model = model
         self.cap = cap
         self.process = process
@@ -125,6 +137,7 @@ class PoseStreamer:
         self.db = db
         self.frame_number = 0
         self.shutdown_event = shutdown_event
+        self.face_recognizer = face_recognizer
 
     def handle_sigint(self, signum, frame):
         logger.info('Received SIGINT, shutting down...')
@@ -148,7 +161,7 @@ class PoseStreamer:
                 self.frame_number += 1
                 video_timestamp = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
                 
-                pose_img, detections = process_frame(frame, self.model, self.show_original)
+                pose_img, detections = process_frame(frame, self.model, self.show_original, self.face_recognizer)
                 self.process.stdin.write(pose_img.astype(np.uint8).tobytes())
                 
                 # Save to database if poses were detected
@@ -228,6 +241,8 @@ def main():
     FPS = int(os.getenv('FPS', 1))
     SHOW_ORIGINAL = os.getenv('SHOW_ORIGINAL', 'False').lower() in ('1', 'true', 'yes')
     SAVE_TO_DB = os.getenv('SAVE_TO_DB', 'True').lower() in ('1', 'true', 'yes')
+    FACE_DIR = os.getenv('KNOWN_FACES_DIR')
+    face_recognizer = FaceRecognizer(FACE_DIR) if FACE_DIR else None
 
     # Initialize database if enabled
     db = None
@@ -268,7 +283,7 @@ def main():
         t_out.start()
         t_err.start()
         threads.extend([t_out, t_err])
-        streamer = PoseStreamer(model, cap, process, camera_name=camera_name, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db, shutdown_event=shutdown_event)
+        streamer = PoseStreamer(model, cap, process, camera_name=camera_name, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db, shutdown_event=shutdown_event, face_recognizer=face_recognizer)
         streamer.stream()
 
     # Start a thread for each camera
