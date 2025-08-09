@@ -70,7 +70,7 @@ The web interface provides:
 ## Database Schema
 
 The SQLite database stores:
-- Detection timestamps
+- Detection timestamps (ISO 8601 in UTC, e.g., `2024-01-30T12:34:56Z`)
 - Frame numbers and video timestamps
 - Pose keypoints (17 points per person)
 - Detection confidences

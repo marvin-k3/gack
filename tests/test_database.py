@@ -2,7 +2,7 @@ import pytest
 import asyncio
 import tempfile
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from gack.database import PoseDatabase
 from gack.pose_stream import Detection
 
@@ -37,7 +37,7 @@ async def test_save_and_retrieve_detection(temp_db):
     await db.init_db()
     
     # Sample detection data
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     frame_number = 1
     video_timestamp = 1.5
     
@@ -86,7 +86,7 @@ async def test_get_latest_detections(temp_db):
     
     # Save multiple detections
     for i in range(5):
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         detection = Detection(
             pose=[(100.0, 200.0)],
             confidence=0.9,
@@ -120,7 +120,7 @@ async def test_get_detection_stats(temp_db):
     
     # Save some detections
     for i in range(3):
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         detection = Detection(
             pose=[(100.0, 200.0)],
             confidence=0.9,

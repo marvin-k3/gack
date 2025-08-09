@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from gack.web_interface import app, db
 from gack.pose_stream import Detection
 from fastapi.testclient import TestClient
@@ -18,7 +18,7 @@ async def test_web_interface_stats():
     
     # Add some test detections
     for i in range(3):
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         detection = Detection(
             pose=[(100.0, 200.0), (150.0, 250.0)],
             confidence=0.9,
@@ -50,7 +50,7 @@ async def test_web_interface_latest_detections():
     
     # Add some test detections
     for i in range(3):
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         detection = Detection(
             pose=[(100.0, 200.0)],
             confidence=0.9,
