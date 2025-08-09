@@ -10,7 +10,7 @@ import sys
 import threading
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from gack.database import PoseDatabase
 import logging
 from pydantic import BaseModel
@@ -166,7 +166,8 @@ class PoseStreamer:
     async def _save_detection(self, video_timestamp, detections):
         """Save detection data to database."""
         try:
-            timestamp = datetime.now().isoformat()
+            # Use UTC timestamps to ensure timezone-aware storage
+            timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             # Convert Pydantic Detection objects to dictionaries for JSON serialization
             detections_list = [detection.model_dump() for detection in detections]
             

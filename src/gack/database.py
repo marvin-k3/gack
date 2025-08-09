@@ -1,7 +1,7 @@
 import aiosqlite
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import os
 import asyncio
@@ -277,7 +277,10 @@ class PoseDatabase:
                     if last_seen:
                         try:
                             last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-                            if (datetime.now().replace(tzinfo=last_seen_dt.tzinfo) - last_seen_dt).total_seconds() > 3600:
+                            if last_seen_dt.tzinfo is None:
+                                last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
+                            # Consider the camera offline if no detections in the last hour
+                            if (datetime.now(timezone.utc) - last_seen_dt).total_seconds() > 3600:
                                 status = "offline"
                         except:
                             status = "offline"
@@ -323,6 +326,8 @@ class PoseDatabase:
         """Get the detection nearest to a specific timestamp for a camera."""
         try:
             target_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            if target_time.tzinfo is None:
+                target_time = target_time.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
         
@@ -354,6 +359,8 @@ class PoseDatabase:
         """Get the detection nearest to a specific timestamp for a camera, but only if within tolerance."""
         try:
             target_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            if target_time.tzinfo is None:
+                target_time = target_time.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
         
@@ -371,21 +378,13 @@ class PoseDatabase:
                 
                 if row:
                     # Check if the detection is within tolerance
-                    # Handle timezone consistently - make both naive or both aware
-                    detection_timestamp = row["timestamp"]
-                    if detection_timestamp.endswith('Z'):
-                        detection_timestamp = detection_timestamp.replace('Z', '+00:00')
-                    
+                    detection_timestamp = row["timestamp"].replace('Z', '+00:00')
                     detection_time = datetime.fromisoformat(detection_timestamp)
-                    
-                    # Ensure both times have timezone info
-                    if target_time.tzinfo is None:
-                        target_time = target_time.replace(tzinfo=detection_time.tzinfo)
                     if detection_time.tzinfo is None:
-                        detection_time = detection_time.replace(tzinfo=target_time.tzinfo)
-                    
+                        detection_time = detection_time.replace(tzinfo=timezone.utc)
+
                     time_diff = abs((target_time - detection_time).total_seconds())
-                    
+
                     if time_diff <= tolerance_seconds:
                         return {
                             "id": row["id"],
