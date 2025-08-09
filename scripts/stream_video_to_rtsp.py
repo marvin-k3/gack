@@ -12,15 +12,23 @@ MEDIA_PORT = 8554
 API_PORT = 9997
 RTSP_PATH = "test"
 
-def wait_for_mediamtx(api_port, timeout=10):
+def wait_for_mediamtx(api_port, timeout=30):
     url = f"http://localhost:{api_port}/v3/paths/list"
-    for _ in range(int(timeout * 5)):
+    print(f"Checking MediaMTX API at {url}...")
+    for i in range(int(timeout * 5)):
         try:
             r = requests.get(url, timeout=2)
             if r.status_code == 200:
+                print(f"MediaMTX is ready! (after {i * 0.2:.1f}s)")
                 return True
-        except Exception:
-            time.sleep(0.2)
+        except requests.exceptions.ConnectionError:
+            # Expected while MediaMTX is starting
+            pass
+        except Exception as e:
+            print(f"Unexpected error checking MediaMTX: {e}")
+        time.sleep(0.2)
+        if i % 25 == 0:  # Print status every 5 seconds
+            print(f"Still waiting for MediaMTX... ({i * 0.2:.1f}s elapsed)")
     return False
 
 def main():
@@ -40,6 +48,11 @@ paths:
 api: yes
 apiAddress: :{args.api_port}
 rtspAddress: :{args.media_port}
+# Disable other protocols to avoid port conflicts
+hlsAddress: ""
+webrtcAddress: ""
+rtmpAddress: ""
+srtAddress: ""
 """
     config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False)
     config_file.write(config_content)
@@ -54,6 +67,18 @@ rtspAddress: :{args.media_port}
         print("Waiting for MediaMTX to be ready...")
         if not wait_for_mediamtx(args.api_port):
             print("MediaMTX did not start in time.", file=sys.stderr)
+            
+            # Check if the process is still running
+            if mediamtx_proc.poll() is not None:
+                print("MediaMTX process has exited. Output:", file=sys.stderr)
+                stdout, stderr = mediamtx_proc.communicate()
+                if stdout:
+                    print("STDOUT:", stdout.decode(), file=sys.stderr)
+                if stderr:
+                    print("STDERR:", stderr.decode(), file=sys.stderr)
+            else:
+                print("MediaMTX process is still running but API is not responding.", file=sys.stderr)
+            
             mediamtx_proc.terminate()
             sys.exit(1)
 
