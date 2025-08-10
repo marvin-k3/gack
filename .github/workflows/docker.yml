@@ -9,8 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      DOCKER_BUILDKIT: 1
     steps:
       - uses: actions/checkout@v4
       - name: Install Rye
@@ -22,4 +20,4 @@ jobs:
       - name: Build wheel
         run: rye build --wheel --clean
       - name: Build Docker image
-        run: docker build --build-context dist=dist -t gack .
+        run: docker build -t gack .
