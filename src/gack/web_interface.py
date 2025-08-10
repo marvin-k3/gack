@@ -280,7 +280,14 @@ async def root():
                                 <label for="end-time" class="form-label">End Time</label>
                                 <input type="datetime-local" class="form-control" id="end-time">
                             </div>
-                            <div class="col-lg-3 col-md-6">
+                            <div class="col-lg-2 col-md-6">
+                                <label for="confidence-threshold" class="form-label">Confidence Threshold</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="range" class="form-range" id="confidence-threshold" min="0" max="100" value="50" step="5">
+                                    <span class="text-muted" id="confidence-value">50%</span>
+                                </div>
+                            </div>
+                            <div class="col-lg-2 col-md-6">
                                 <label class="form-label">&nbsp;</label>
                                 <div class="d-flex gap-2">
                                     <button type="button" class="btn btn-primary" onclick="loadByTimeRange()">Load Range</button>
@@ -350,6 +357,7 @@ async def root():
             let timelineEnd = null;
             let liveStreamInterval = null;
             let isLiveMode = true;
+            let confidenceThreshold = 0.5; // Default 50% threshold
             
             function switchTab(tabName) {
                 // Hide all tab panes
@@ -378,6 +386,7 @@ async def root():
                 await loadTimelineData();
                 await loadVersionInfo();
                 setupTimelineInteraction();
+                setupConfidenceThreshold();
                 startLiveStream();
             }
             
@@ -637,6 +646,23 @@ async def root():
                 }
             }
             
+            function setupConfidenceThreshold() {
+                const slider = document.getElementById('confidence-threshold');
+                const valueDisplay = document.getElementById('confidence-value');
+                
+                slider.addEventListener('input', function() {
+                    confidenceThreshold = this.value / 100;
+                    valueDisplay.textContent = this.value + '%';
+                    
+                    // Re-render current detections with new threshold
+                    if (!isLiveMode && currentTime) {
+                        cameras.forEach(camera => {
+                            updateCamera(camera.name, 'timeline');
+                        });
+                    }
+                });
+            }
+            
             function renderDetectionOnCanvas(cameraName, detection) {
                 const canvas = document.getElementById(`canvas_${cameraName}`);
                 if (!canvas) return;
@@ -647,6 +673,13 @@ async def root():
                 const detections = detection.detection_data.detections || [];
                 if (detections.length === 0) return;
                 
+                // Filter detections by confidence threshold
+                const filteredDetections = detections.filter(personDetection => 
+                    personDetection.confidence >= confidenceThreshold
+                );
+                
+                if (filteredDetections.length === 0) return;
+                
                 // Dark background and frame boundary
                 ctx.fillStyle = 'rgba(20, 20, 20, 1)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -654,7 +687,7 @@ async def root():
                 ctx.lineWidth = 2;
                 ctx.strokeRect(0, 0, canvas.width, canvas.height);
                 
-                const firstDetection = detections[0];
+                const firstDetection = filteredDetections[0];
                 const sourceWidth = firstDetection.source_frame_width || 1920;
                 const sourceHeight = firstDetection.source_frame_height || 1080;
                 
@@ -664,7 +697,7 @@ async def root():
                 const offsetX = (canvas.width - scaledWidth) / 2;
                 const offsetY = (canvas.height - scaledHeight) / 2;
                 
-                detections.forEach((personDetection) => {
+                filteredDetections.forEach((personDetection) => {
                     const { confidence, bbox, keypoint_confidences, pose } = personDetection;
                     
                     // Bounding box
@@ -812,6 +845,9 @@ async def root():
                 document.getElementById('camera-filter').value = '';
                 document.getElementById('start-time').value = '';
                 document.getElementById('end-time').value = '';
+                document.getElementById('confidence-threshold').value = '50';
+                document.getElementById('confidence-value').textContent = '50%';
+                confidenceThreshold = 0.5;
                 loadTimelineData();
             }
             
