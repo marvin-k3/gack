@@ -676,6 +676,27 @@ async def root():
                     ctx.lineWidth = Math.max(1, 2 * scale);
                     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
                     
+                    // Confidence percentage text
+                    const confidencePercent = Math.round(confidence * 100);
+                    const text = `${confidencePercent}%`;
+                    ctx.font = `${Math.max(12, 14 * scale)}px Arial`;
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+                    ctx.lineWidth = Math.max(1, 2 * scale);
+                    
+                    // Measure text to position it properly
+                    const textMetrics = ctx.measureText(text);
+                    const textWidth = textMetrics.width;
+                    const textHeight = Math.max(12, 14 * scale);
+                    
+                    // Position text at top-left corner of bounding box
+                    const textX = x1 + 5;
+                    const textY = y1 + textHeight + 5;
+                    
+                    // Draw text with outline for better visibility
+                    ctx.strokeText(text, textX, textY);
+                    ctx.fillText(text, textX, textY);
+                    
                     // Keypoints
                     pose.forEach((point, kpIndex) => {
                         if (keypoint_confidences[kpIndex] > 0.5) {
@@ -931,7 +952,7 @@ async def get_detection(detection_id: int):
 async def get_version():
     return get_version_info()
 
-def run_web_interface(host: str = "0.0.0.0", port: int = 8000):
+def run_web_interface(host: str = "0.0.0.0", port: int = 8007):
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":
