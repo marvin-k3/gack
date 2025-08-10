@@ -12,7 +12,6 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from gack.database import PoseDatabase
-import logging
 from pydantic import BaseModel
 from typing import List, Tuple, Optional
 logger = logging.getLogger(__name__)
@@ -113,7 +112,50 @@ def process_frame(frame, model, show_original=False):
 
 
 class PoseStreamer:
-    def __init__(self, model, cap, process, camera_name, fps=1, show_original=False, ffmpeg_threads=None, db=None, shutdown_event=None):
+    def __init__(
+        self,
+        model,
+        cap,
+        process,
+        camera_name,
+        fps=1,
+        show_original=False,
+        ffmpeg_threads=None,
+        db=None,
+        shutdown_event=None,
+        rtsp_url: str | None = None,
+        max_reconnect_backoff: float = 5.0,
+    ):
+        """Stream poses from a video source.
+
+        Parameters
+        ----------
+        model : YOLO
+            The pose model to use.
+        cap : cv2.VideoCapture
+            OpenCV capture object.
+        process : subprocess.Popen
+            ffmpeg process used for writing frames.
+        camera_name : str
+            Name of the camera, used for logging and database storage.
+        fps : int, optional
+            Output frames per second, by default 1.
+        show_original : bool, optional
+            Whether to overlay pose on original frame, by default False.
+        ffmpeg_threads : list[threading.Thread], optional
+            Threads reading ffmpeg output.
+        db : PoseDatabase, optional
+            Database instance for saving detections.
+        shutdown_event : threading.Event, optional
+            Shared event to signal shutdown.
+        rtsp_url : str, optional
+            Original RTSP URL. If provided, the streamer will attempt to
+            reconnect using this URL when frame reads fail.
+        max_reconnect_backoff : float, optional
+            Maximum number of seconds to wait between reconnection attempts
+            when using exponential backoff.
+        """
+
         self.model = model
         self.cap = cap
         self.process = process
@@ -125,6 +167,8 @@ class PoseStreamer:
         self.db = db
         self.frame_number = 0
         self.shutdown_event = shutdown_event
+        self.rtsp_url = rtsp_url
+        self.max_reconnect_backoff = max_reconnect_backoff
 
     def handle_sigint(self, signum, frame):
         logger.info('Received SIGINT, shutting down...')
@@ -138,7 +182,10 @@ class PoseStreamer:
                 ret, frame = self.cap.read()
                 if not ret:
                     logger.error('Failed to read frame from stream')
-                    break
+                    if not self._attempt_reconnect():
+                        break
+                    else:
+                        continue
 
                 now = time.time()
                 if now - last_output_time < interval:
@@ -162,6 +209,46 @@ class PoseStreamer:
             for t in self.ffmpeg_threads:
                 t.join(timeout=1)
             logger.info('Shutdown complete.')
+
+    def _attempt_reconnect(self) -> bool:
+        """Attempt to reconnect to the video stream using exponential backoff.
+
+        Returns
+        -------
+        bool
+            True if reconnection succeeded and streaming should continue,
+            False if reconnection failed and streaming should stop.
+        """
+        if not self.rtsp_url:
+            # Without a URL we cannot reopen the capture; bail out.
+            logger.error("No RTSP URL specified for reconnection")
+            return False
+
+        attempts = 0
+        wait_time = 1.0
+        while not self.shutdown and not (self.shutdown_event and self.shutdown_event.is_set()):
+            attempts += 1
+            logger.info(
+                "Attempting to reconnect to %s (attempt %d)",
+                self.camera_name,
+                attempts,
+            )
+
+            self.cap.release()
+            time.sleep(wait_time)
+            self.cap = cv2.VideoCapture(self.rtsp_url)
+            if self.cap.isOpened():
+                logger.info("Reconnected to stream")
+                return True
+
+            logger.warning(
+                "Reconnection attempt %d failed; retrying in %.1fs",
+                attempts,
+                wait_time,
+            )
+            wait_time = min(wait_time * 2, self.max_reconnect_backoff)
+
+        return False
     
     async def _save_detection(self, video_timestamp, detections):
         """Save detection data to database."""
@@ -229,6 +316,7 @@ def main():
     FPS = int(os.getenv('FPS', 1))
     SHOW_ORIGINAL = os.getenv('SHOW_ORIGINAL', 'False').lower() in ('1', 'true', 'yes')
     SAVE_TO_DB = os.getenv('SAVE_TO_DB', 'True').lower() in ('1', 'true', 'yes')
+    RECONNECT_BACKOFF_MAX = float(os.getenv('RECONNECT_BACKOFF_MAX', '5'))
 
     # Initialize database if enabled
     db = None
@@ -269,7 +357,19 @@ def main():
         t_out.start()
         t_err.start()
         threads.extend([t_out, t_err])
-        streamer = PoseStreamer(model, cap, process, camera_name=camera_name, fps=FPS, show_original=SHOW_ORIGINAL, ffmpeg_threads=threads, db=db, shutdown_event=shutdown_event)
+        streamer = PoseStreamer(
+            model,
+            cap,
+            process,
+            camera_name=camera_name,
+            fps=FPS,
+            show_original=SHOW_ORIGINAL,
+            ffmpeg_threads=threads,
+            db=db,
+            shutdown_event=shutdown_event,
+            rtsp_url=rtsp_url,
+            max_reconnect_backoff=RECONNECT_BACKOFF_MAX,
+        )
         streamer.stream()
 
     # Start a thread for each camera
@@ -289,4 +389,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main() 
+    main()
