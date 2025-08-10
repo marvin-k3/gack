@@ -730,35 +730,87 @@ async def root():
                     ctx.strokeText(text, textX, textY);
                     ctx.fillText(text, textX, textY);
                     
-                    // Keypoints
+                    // Define body part colors and groups
+                    const bodyPartColors = {
+                        // Head and face
+                        0: [255, 255, 0],   // nose - yellow
+                        1: [255, 255, 0],   // left eye - yellow
+                        2: [255, 255, 0],   // right eye - yellow
+                        3: [255, 255, 0],   // left ear - yellow
+                        4: [255, 255, 0],   // right ear - yellow
+                        
+                        // Arms
+                        5: [0, 255, 255],   // left shoulder - cyan
+                        6: [0, 255, 255],   // right shoulder - cyan
+                        7: [0, 255, 255],   // left elbow - cyan
+                        8: [0, 255, 255],   // right elbow - cyan
+                        9: [0, 255, 255],   // left wrist - cyan
+                        10: [0, 255, 255],  // right wrist - cyan
+                        
+                        // Torso and legs
+                        11: [255, 0, 255],  // left hip - magenta
+                        12: [255, 0, 255],  // right hip - magenta
+                        13: [255, 0, 255],  // left knee - magenta
+                        14: [255, 0, 255],  // right knee - magenta
+                        15: [255, 0, 255],  // left ankle - magenta
+                        16: [255, 0, 255]   // right ankle - magenta
+                    };
+
+                    // Draw keypoints with body part colors
                     pose.forEach((point, kpIndex) => {
                         if (keypoint_confidences[kpIndex] > 0.5) {
                             const x = (point[0] * scale) + offsetX;
                             const y = (point[1] * scale) + offsetY;
                             
-                            ctx.fillStyle = `rgba(0, 255, 0, ${keypoint_confidences[kpIndex]})`;
+                            const color = bodyPartColors[kpIndex] || [0, 255, 0];
+                            const alpha = keypoint_confidences[kpIndex];
+                            
+                            // Draw larger, more visible keypoints
+                            ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+                            ctx.strokeStyle = `rgba(255, 255, 255, 0.8)`;
+                            ctx.lineWidth = Math.max(1, 1 * scale);
+                            
+                            const radius = Math.max(2, 4 * scale);
                             ctx.beginPath();
-                            ctx.arc(x, y, Math.max(1, 3 * scale), 0, 2 * Math.PI);
+                            ctx.arc(x, y, radius, 0, 2 * Math.PI);
                             ctx.fill();
+                            ctx.stroke();
                         }
                     });
-                    
-                    // Skeleton
+
+                    // Draw skeleton with body part colors
                     const skeleton = [
-                        [5, 7], [7, 9], [6, 8], [8, 10], [5, 6], [5, 11], [6, 12],
-                        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
+                        // Face connections
+                        [1, 2], [1, 3], [2, 4], [0, 1], [0, 2],
+                        
+                        // Arms
+                        [5, 7], [7, 9], [6, 8], [8, 10],
+                        
+                        // Shoulders
+                        [5, 6],
+                        
+                        // Torso
+                        [5, 11], [6, 12], [11, 12],
+                        
+                        // Legs
+                        [11, 13], [13, 15], [12, 14], [14, 16]
                     ];
-                    
-                    ctx.strokeStyle = `rgba(255, 0, 0, ${confidence})`;
-                    ctx.lineWidth = Math.max(1, 1.5 * scale);
-                    
+
                     skeleton.forEach(([start, end]) => {
                         if (start < pose.length && end < pose.length && 
                             keypoint_confidences[start] > 0.5 && keypoint_confidences[end] > 0.5) {
+                            
                             const x1 = (pose[start][0] * scale) + offsetX;
                             const y1 = (pose[start][1] * scale) + offsetY;
                             const x2 = (pose[end][0] * scale) + offsetX;
                             const y2 = (pose[end][1] * scale) + offsetY;
+                            
+                            // Use color based on the start keypoint's body part
+                            const color = bodyPartColors[start] || [255, 0, 0];
+                            const alpha = Math.min(keypoint_confidences[start], keypoint_confidences[end]);
+                            
+                            ctx.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+                            ctx.lineWidth = Math.max(1, 2 * scale);
                             
                             ctx.beginPath();
                             ctx.moveTo(x1, y1);
