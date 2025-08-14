@@ -10,6 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir uv
 
 COPY dist/*.whl /tmp/
-RUN uv pip install --no-cache /tmp/*.whl && rm /tmp/*.whl
+RUN uv pip install --system --no-cache /tmp/*.whl && rm /tmp/*.whl
 
 CMD ["python", "-m", "gack"]
